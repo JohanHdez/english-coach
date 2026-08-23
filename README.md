@@ -18,20 +18,26 @@ language. The codebase and its documentation are in English.
 
 ## Install
 
-> Not on the Chrome Web Store yet. It installs in developer mode, which takes a minute and needs
-> no account.
+> Not on the Chrome Web Store yet. It installs in developer mode: about a minute, no account, and
+> nothing to compile.
 
-1. Unzip the `english-coach` folder wherever you want to keep it (don't delete it afterwards:
-   Chrome loads the extension from there).
+1. **[Download the latest version (.zip)](https://github.com/JohanHdez/english-coach/archive/refs/tags/v1.12.1.zip)**
+   and unzip it wherever you want to keep it — Desktop or Documents is fine. **Do not delete the
+   folder afterwards**: Chrome loads the extension from there every time it starts.
 2. Open `chrome://extensions`.
 3. Turn on **Developer mode** (top right).
-4. Click **Load unpacked** and pick the `english-coach` folder.
+4. Click **Load unpacked** and pick the folder you just unzipped (the one containing
+   `manifest.json`).
 5. The settings page opens. Click **Grant microphone permission**.
 6. For the coach (suggestions and report), paste a free Groq API key into section 3. Create one
    at [console.groq.com/keys](https://console.groq.com/keys) with a Google or GitHub account,
    **no credit card**, in under a minute. Skip this step if you only want transcription.
 7. Click **Save settings**.
 8. Pin the extension to the toolbar (puzzle icon → pin).
+
+To update later, download the new zip, and in `chrome://extensions` remove the old card before
+loading the new folder. Unpacked extension IDs depend on the folder path, so leaving both loaded
+gives you two copies of the extension running at once.
 
 ## Use
 
