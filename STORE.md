@@ -114,7 +114,7 @@ common reason a version is rejected.
 
 ### Permisos de host  [688 chars]
 
-> The extension contacts exactly three hosts, all of them essential to the single purpose. huggingface.co serves the Whisper speech recognition model, downloaded once and cached so transcription then works offline and on-device. api.groq.com and api.anthropic.com are the language model providers the user configures for coaching; only the conversation text is sent, and only when the user enables the coach and provides their own API key. No broad host access is requested: the http/https patterns are declared as optional_host_permissions and are not granted at install, since they are only needed if the user chooses to point the engine at their own self-hosted OpenAI-compatible server.
+> The extension contacts exactly three hosts, all of them essential to the single purpose. huggingface.co serves the Whisper speech recognition model, downloaded once and cached so transcription then works offline and on-device. api.groq.com and api.anthropic.com are the language model providers the user configures for coaching; only the conversation text is sent, and only when the user enables the coach and provides their own API key. No broad host permission is requested. The extension does declare a content script on all http(s) sites, because the coaching interface renders inside the page where the conversation happens and there is no way to enumerate in advance which site that will be: Meet, Zoom, Teams, YouTube, or any practice app. That content script mounts a single element inside a Shadow DOM, reads nothing from the page, and sends nothing anywhere.
 
 ## Remote code
 
