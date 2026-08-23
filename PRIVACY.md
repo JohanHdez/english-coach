@@ -81,7 +81,9 @@ specified.
 | `sidePanel` | Full transcript view |
 | `notifications` | Telling you when recording fails while no interface is visible |
 | `contextMenus` | Starting and stopping from the right-click menu |
-| Website access | The coach renders inside the page where the conversation happens, and we cannot know in advance which site you will be talking on (Meet, Zoom, Teams, YouTube, a practice app…) |
+| Host access to `huggingface.co`, `api.groq.com`, `api.anthropic.com` | Downloading the speech model, and calling the coach provider you configured |
+| Content script on all sites | The coach renders inside the page where the conversation happens, and we cannot know in advance which site you will be talking on (Meet, Zoom, Teams, YouTube, a practice app…). It mounts one element in a Shadow DOM and reads nothing from the page |
+| Optional host access (not granted at install) | Only requested if you point the engine at your own server (Ollama, LM Studio) or need the coach re-injected into a tab opened before installing |
 
 ## What we do not do
 

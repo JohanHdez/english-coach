@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "English Coach — Transcriptor de conversaciones",
-  "version": "1.12.1",
+  "version": "1.13.0",
   "description": "Captura el audio de la pestaña y tu micrófono, los transcribe por separado (tú / interlocutor) y te deja analizar tu inglés.",
   "minimum_chrome_version": "116",
   "permissions": [
@@ -20,7 +20,9 @@
     "https://*.huggingface.co/*",
     "https://*.hf.co/*",
     "https://api.groq.com/*",
-    "https://api.anthropic.com/*",
+    "https://api.anthropic.com/*"
+  ],
+  "optional_host_permissions": [
     "http://*/*",
     "https://*/*"
   ],

@@ -51,8 +51,10 @@ Confirm the archive's size and top-level contents before handing it over.
 
 ## Publishing to the Chrome Web Store
 
-Only when the user asks to publish, not on every release. The zip from step 5 is the upload
-artifact. Before uploading, confirm all of the following, because each one is a rejection risk:
+Only when the user asks to publish, not on every release. `STORE.md` holds the listing copy,
+the per-permission justifications and the data-usage answers — update it in the same change that
+alters `manifest.json`, or the listing will contradict the manifest and the review will bounce.
+The zip from step 5 is the upload artifact. Before uploading, confirm all of the following:
 
 - **Preflight is clean.** Its `permissions` and `dead-code` warnings map directly to what review
   asks about: a permission with no call site has no honest justification, and unreachable files
