@@ -20,41 +20,54 @@ Required field. One sentence, and every permission must serve it.
 > Transcribe the two sides of a spoken English conversation separately and coach the user's
 > English, live and in a report afterwards.
 
-## Short description (132 characters max)
+## Title and summary — taken from `manifest.json`
 
-> Transcribes your English conversations by speaker with on-device Whisper and coaches you live.
-> Free, private, no account.
+The dashboard fills "Título del paquete" from `name` and "Resumen del paquete" from
+`description`. Both are already Spanish and the description is 124 of the 132 characters
+allowed. Do not retype them in the form; change `manifest.json` and re-upload instead, or the
+listing and the package will disagree.
 
 ## Detailed description
 
-> **English Coach turns any conversation into English practice.**
->
-> It records two separate tracks — the tab's audio (the person you are talking to) and your
-> microphone (you) — transcribes each one, and labels the conversation by speaker. Works with
-> Google Meet, Zoom on the web, Teams, YouTube, or any practice app.
->
-> **Private by default.** Speech recognition runs inside your browser with Whisper. Your audio
-> never leaves your machine. Translation and live transcription use Chrome's on-device APIs, so
-> they do not send anything either.
->
-> **Free end to end.** No account, no subscription, no minute limits. The optional coach runs on
-> a free API key you create in under a minute, with no credit card.
->
-> WHAT IT DOES
->
-> • Two-speaker transcription: your turns and theirs, separated and timestamped
-> • Spanish translation under each of the other speaker's turns, on-device
-> • Live transcription that shows what is being said as it happens
-> • Vocabulary chips after each turn: expressions you are likely to need right now
-> • Suggested replies in two groups — phrases to get started, and complete sentences carrying
->   your idea, grounded in a profile you write
-> • A closing report: grammar corrections with the reason, calques from Spanish, expressions you
->   could have used, filler words, and an approximate CEFR level with exercises
->
-> Interface in Spanish: this is a tool for Spanish speakers practising English, so the hints and
-> the report are written in the learner's language.
->
-> Open source under GPL-3.0.
+**Paste as plain text.** The Store field renders nothing: Markdown `>` quotes, `**bold**` and
+`#` headings would appear literally in the published listing. The block below is stored fenced
+precisely so it is copied verbatim without picking up quote markers.
+
+**Write it in Spanish.** The listing is what a prospective user reads, and the audience is
+Spanish speakers looking for a tool to practise English — they search in Spanish. The repository
+is English; the storefront is not the repository.
+
+```
+English Coach convierte cualquier conversación en práctica de inglés.
+
+Graba dos pistas separadas —el audio de la pestaña (la persona con la que hablas) y tu micrófono (tú)—, transcribe cada una y te deja la conversación etiquetada por hablante. Funciona con Google Meet, Zoom web, Teams, YouTube o cualquier app de práctica.
+
+PRIVADO POR DEFECTO
+
+El reconocimiento de voz corre dentro de tu navegador con Whisper. Tu audio no sale del equipo. La traducción y la transcripción en vivo usan las APIs integradas de Chrome, así que tampoco envían nada.
+
+GRATIS DE PRINCIPIO A FIN
+
+Sin cuenta, sin suscripción y sin límite de minutos. El coach es opcional y funciona con una API key gratuita que creas en menos de un minuto, sin tarjeta.
+
+QUÉ HACE
+
+• Transcripción de dos hablantes: tus intervenciones y las suyas, separadas y con hora
+• Traducción al español bajo cada turno del interlocutor, en tu dispositivo
+• Transcripción en vivo que muestra lo que se está diciendo mientras se dice
+• Chips de vocabulario tras cada turno: expresiones que probablemente vas a necesitar ahora
+• Respuestas sugeridas en dos bloques: frases para arrancar, y frases completas con tu idea, apoyadas en un perfil que escribes tú
+• Informe final: errores de gramática con la corrección y el porqué, calcos del español, expresiones que encajaban y no usaste, muletillas y un nivel CEFR aproximado con ejercicios
+
+PARA QUIÉN ES
+
+Para hispanohablantes que ya se defienden en inglés pero se traban en conversaciones reales: entrevistas, reuniones de trabajo, llamadas con clientes. La interfaz está en español a propósito, porque las pistas y el informe se leen mejor en tu idioma.
+
+Código abierto bajo GPL-3.0: github.com/JohanHdez/english-coach
+```
+
+Category: **Educación**. Default language: **Spanish**. English can be added later as a
+translation without touching the default.
 
 ## Permission justifications
 
