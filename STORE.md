@@ -103,6 +103,20 @@ common reason a version is rejected.
 
 > The extension contacts exactly three hosts, all of them essential to the single purpose. huggingface.co serves the Whisper speech recognition model, downloaded once and cached so transcription then works offline and on-device. api.groq.com and api.anthropic.com are the language model providers the user configures for coaching; only the conversation text is sent, and only when the user enables the coach and provides their own API key. No broad host access is requested: the http/https patterns are declared as optional_host_permissions and are not granted at install, since they are only needed if the user chooses to point the engine at their own self-hosted OpenAI-compatible server.
 
+## Remote code
+
+**Answer: No.** Verified, not assumed — the CSP is `script-src 'self' 'wasm-unsafe-eval'`, no HTML
+loads a remote `<script src>`, there is no dynamic `import()` of a URL, no `eval` and no
+`new Function`, and both ONNX Runtime `.wasm` binaries ship inside `vendor/` with
+`env.backends.onnx.wasm.wasmPaths` pointed at `chrome.runtime.getURL('vendor/')`.
+
+What is downloaded from `huggingface.co` is the Whisper model's `.onnx` weights: data consumed by
+the bundled runtime, not JS or Wasm that executes. Google's definition covers "JS or Wasm not
+included in the extension package", and the Wasm is included — that is why `vendor/` is 37 MB.
+
+Answering "yes" would declare an MV3 violation the extension does not commit and would send it to
+deep review for nothing. Re-verify this answer whenever `vendor/` or `worker.js` changes.
+
 ## Data usage disclosure
 
 Match `PRIVACY.md` exactly.
