@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>English Coach</title>
+    <link rel="stylesheet" href="sidepanel.css" />
+  </head>
+  <body>
+    <header>
+      <div class="brand">
+        <span class="dot" id="dot"></span>
+        <h1>English Coach</h1>
+      </div>
+      <button id="settings" class="icon" title="Ajustes">⚙</button>
+    </header>
+
+    <section class="controls">
+      <label class="field">
+        <span>Audio del interlocutor</span>
+        <select id="themSource">
+          <option value="tab">Pestaña actual (Meet, Zoom web, YouTube…)</option>
+          <option value="device">Dispositivo de entrada (loopback / apps de escritorio)</option>
+          <option value="none">Ninguno (solo mi voz)</option>
+        </select>
+      </label>
+
+      <label class="field" id="deviceField" hidden>
+        <span>Dispositivo</span>
+        <select id="themDevice"></select>
+      </label>
+
+      <label class="check">
+        <input type="checkbox" id="captureMic" checked />
+        <span>Grabar también mi micrófono</span>
+      </label>
+
+      <button id="toggle" class="primary">● Empezar</button>
+      <p id="status" class="status">Listo.</p>
+    </section>
+
+    <section id="coach" class="coach" hidden>
+      <div class="coach-head">
+        <span class="coach-title">Coach</span>
+        <button id="askReply" class="small ghost" title="También con ⌘⇧E / Ctrl+Shift+E">💡 Respuesta</button>
+      </div>
+      <div id="chips" class="chips"></div>
+      <p id="nudge" class="nudge"></p>
+      <div id="replyBox" class="reply" hidden>
+        <p id="replyStatus" class="reply-status" hidden></p>
+        <div id="replyOpeners" class="reply-group" hidden>
+          <span class="reply-label">Para arrancar</span>
+          <div class="reply-list"></div>
+        </div>
+        <div id="replyIdeas" class="reply-group" hidden>
+          <span class="reply-label">Para decir tu idea</span>
+          <div class="reply-list"></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="transcript" class="transcript">
+      <p class="empty">Aquí aparecerá la conversación transcrita.</p>
+    </section>
+
+    <div id="partial" class="partial" hidden>
+      <span class="meta">Interlocutor · hablando ahora</span>
+      <span id="partialEn"></span>
+      <span id="partialEs" class="es"></span>
+    </div>
+
+    <footer>
+      <button id="report" class="primary small">📊 Informe de la sesión</button>
+      <div class="row">
+        <button id="analyze" class="small">Copiar prompt</button>
+        <button id="download" class="small">Descargar</button>
+        <button id="clear" class="small danger">Limpiar</button>
+      </div>
+    </footer>
+
+    <script src="sidepanel.js" type="module"></script>
+  </body>
+</html>

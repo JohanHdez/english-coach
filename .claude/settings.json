@@ -1,0 +1,31 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node .claude/skills/preflight/scripts/preflight.mjs:*)",
+      "Bash(node --test:*)",
+      "Bash(node --check:*)",
+      "Bash(node -p:*)",
+      "Bash(node -e:*)",
+      "Read(./**)"
+    ],
+    "deny": [
+      "Edit(./vendor/**)",
+      "Write(./vendor/**)",
+      "Edit(./icons/**)",
+      "Write(./icons/**)"
+    ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/validate-edit.mjs\""
+          }
+        ]
+      }
+    ]
+  }
+}

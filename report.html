@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>English Coach — Informe</title>
+    <link rel="stylesheet" href="sidepanel.css" />
+    <style>
+      body { display: block; max-width: 780px; margin: 0 auto; padding: 32px 24px 80px; font-size: 14.5px; }
+      .head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 20px; }
+      .head h1 { font-size: 21px; margin: 0; }
+      .head .when { color: var(--muted); font-size: 12px; }
+      .md h2 { font-size: 16px; margin: 28px 0 8px; padding-bottom: 5px; border-bottom: 1px solid var(--border); }
+      .md h3 { font-size: 14px; margin: 18px 0 6px; }
+      .md p { margin: 8px 0; }
+      .md ul, .md ol { margin: 8px 0; }
+      .md li { margin: 4px 0; }
+      .md table { border-collapse: collapse; width: 100%; margin: 12px 0; font-size: 13.5px; display: block; overflow-x: auto; }
+      .md th, .md td { border: 1px solid var(--border); padding: 7px 9px; text-align: left; vertical-align: top; }
+      .md th { background: var(--panel); font-weight: 600; }
+      .md code { background: var(--panel); border: 1px solid var(--border); padding: 1px 5px; border-radius: 5px; font-size: 12.5px; }
+      .actions { display: flex; gap: 8px; margin-bottom: 22px; }
+      details { margin-top: 32px; border-top: 1px solid var(--border); padding-top: 14px; }
+      summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+      details .bubble { max-width: 100%; margin: 6px 0; }
+    </style>
+  </head>
+  <body>
+    <div class="head">
+      <h1>Informe de la sesión</h1>
+      <span class="when" id="when"></span>
+    </div>
+    <div class="actions">
+      <button id="download" class="primary small">Descargar .md</button>
+      <button id="copy" class="small">Copiar</button>
+    </div>
+    <div id="md" class="md"><p>Cargando…</p></div>
+    <details id="raw" hidden>
+      <summary>Ver la transcripción completa</summary>
+      <div id="transcript"></div>
+    </details>
+    <script src="report.js" type="module"></script>
+  </body>
+</html>
