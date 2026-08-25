@@ -7,7 +7,11 @@ import { askHints, askReply, askReport, groqBaseOf, redact, resolveProvider, PRO
 import { startLive, liveAvailability } from './live.js';
 
 const HINT_DEBOUNCE_MS = 1200;   // wait in case the other speaker keeps talking
-const HINT_COOLDOWN_MS = 6000;   // at most one round of chips every 6 s
+// Soft cuts turn a monologue into a stream of 4-6 s turns, each of which
+// schedules hints — the cooldown is what keeps that within Groq's free tier
+// (8000 tokens/min): 12 s allows at most 5 rounds a minute (~5.3k tokens),
+// leaving room for a suggested reply and even the report in the same minute.
+const HINT_COOLDOWN_MS = 12000;
 
 const state = {
   running: false,
@@ -200,12 +204,23 @@ async function apiTranscribe(audio) {
 // ---------------------------------------------------------------- serial queue
 
 // What the other speaker says is urgent for following the conversation; your own
-// turns can wait. They jump ahead without disturbing the order within each voice.
+// turns can wait — but not forever. Soft cuts make a monologue produce a 'them'
+// segment every few seconds, so an unbounded priority would starve queued 'me'
+// turns for as long as the other person keeps talking. Each 'me' segment can be
+// overtaken at most MAX_BYPASS times; after that, new 'them' segments queue
+// behind it. Order within each voice is never disturbed.
+const MAX_BYPASS = 3;
+
 function enqueue(seg) {
   if (seg.speaker === 'them') {
-    const i = state.queue.findIndex((s) => s.speaker === 'me');
+    const i = state.queue.findIndex((s) => s.speaker === 'me' && (s.bypassed || 0) < MAX_BYPASS);
     if (i === -1) state.queue.push(seg);
-    else state.queue.splice(i, 0, seg);
+    else {
+      for (let j = i; j < state.queue.length; j++) {
+        if (state.queue[j].speaker === 'me') state.queue[j].bypassed = (state.queue[j].bypassed || 0) + 1;
+      }
+      state.queue.splice(i, 0, seg);
+    }
   } else {
     state.queue.push(seg);
   }

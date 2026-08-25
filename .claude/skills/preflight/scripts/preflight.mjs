@@ -155,6 +155,8 @@ while (queue.length) {
 
 if (rootsIntact) {
   for (const file of [...scripts, ...pages]) {
+    // Test files are unreachable from the manifest by design: they run in Node.
+    if (file.endsWith('.test.js')) continue;
     if (!reachable.has(file)) {
       warn('dead-code', `${file} is not reachable from manifest.json — delete it or wire it up`);
     }

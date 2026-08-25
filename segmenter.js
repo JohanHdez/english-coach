@@ -4,6 +4,12 @@ export const SR = 16000;         // working sample rate
 export const CHUNK_MS = 100;     // block size the worklet delivers
 export const SILENCE_MS = 700;   // silence that closes a phrase
 export const MAX_SEG_MS = 18000; // forced cut
+// A fast speaker without real pauses would otherwise produce one giant paragraph
+// that only appears (and gets translated) when they finally stop. Once a phrase
+// is SOFT_CUT_MS long, a mere breath dip of SOFT_SILENCE_MS closes it, so long
+// monologues stream out as readable 4-6 s pieces instead.
+export const SOFT_CUT_MS = 3500;
+export const SOFT_SILENCE_MS = 300;
 export const MIN_SEG_MS = 900;   // discards noise and lone filler sounds
 export const MIN_VOICED = 5;     // minimum voiced blocks (0.5 s of real speech)
 export const PREROLL = 3;        // preceding blocks kept as preroll
@@ -54,20 +60,34 @@ export class Segmenter {
     else this.silence += CHUNK_MS;
 
     const durationMs = this.chunks.length * CHUNK_MS;
-    if (this.silence >= SILENCE_MS || durationMs >= MAX_SEG_MS) this.flush();
+    const softCut = durationMs >= SOFT_CUT_MS && this.silence >= SOFT_SILENCE_MS;
+    if (this.silence >= SILENCE_MS) this.flush();
+    else if (softCut || durationMs >= MAX_SEG_MS) this.flush(true);
   }
 
-  flush() {
+  // keepActive: a mid-utterance emission (soft or hard cut). The segmenter stays
+  // inside the phrase, which keeps the adaptive floor frozen — a breath dip has
+  // more energy than true ambient, and letting the floor adapt at every cut of a
+  // long monologue ratchets the threshold up until quiet word onsets stop
+  // crossing it. Only a real pause returns to idle.
+  flush(keepActive = false) {
     if (!this.active) return;
     const durationMs = this.chunks.length * CHUNK_MS;
     const chunks = this.chunks;
     const startedAt = this.startedAt;
     const voiced = this.voicedCount;
-    this.active = false;
     this.chunks = [];
-    this.pre = [];
-    this.silence = 0;
     this.voicedCount = 0;
+    if (keepActive) {
+      // The next piece starts at the cut; the silence counter keeps running so
+      // a dip that turns into a real pause still closes (the near-empty stub is
+      // then discarded by the minimum-length rules).
+      this.startedAt = this.now();
+    } else {
+      this.active = false;
+      this.pre = [];
+      this.silence = 0;
+    }
 
     if (durationMs < this.minSegMs || voiced < this.minVoiced) return;
 

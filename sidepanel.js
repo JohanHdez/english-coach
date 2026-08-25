@@ -7,7 +7,7 @@ const els = {
   dot: $('dot'), toggle: $('toggle'), status: $('status'), transcript: $('transcript'),
   themSource: $('themSource'), themDevice: $('themDevice'), deviceField: $('deviceField'),
   captureMic: $('captureMic'), settings: $('settings'),
-  coach: $('coach'), chips: $('chips'), nudge: $('nudge'), askReply: $('askReply'),
+  coach: $('coach'), chips: $('chips'), nudge: $('nudge'), hintOpeners: $('hintOpeners'), askReply: $('askReply'),
   replyBox: $('replyBox'), replyStatus: $('replyStatus'),
   replyOpeners: $('replyOpeners'), replyIdeas: $('replyIdeas'),
   report: $('report'), analyze: $('analyze'), download: $('download'), clear: $('clear'),
@@ -86,7 +86,10 @@ function setRunning(v) {
 
 // ------------------------------------------------------------------- coach
 
-function showHints({ words = [], nudge = '' }) {
+function showHints({ words = [], nudge = '', openers = [] }) {
+  // Unconditional rebuild in a slot of their own: an empty round clears stale
+  // openers, and the reply box's ⌘⇧E openers/ideas pairing is never touched.
+  fillGroup(els.hintOpeners, openers);
   els.chips.innerHTML = '';
   for (const w of words) {
     const chip = document.createElement('span');
@@ -104,14 +107,22 @@ function showHints({ words = [], nudge = '' }) {
   els.nudge.textContent = nudge || '';
 }
 
-// Provisional text from the live layer. Translated on a debounce because interim
-// results arrive word by word and translating each one saturates the translator.
+// Provisional text from the live layer. A debounce would reset on every interim
+// word and never fire while the speaker keeps talking, so this throttles: one
+// translation per second at most, always of the latest text, applied in order.
 let partialTimer = null;
+let partialTrAt = 0;
+let partialTrSeq = 0;
+let partialTrShown = 0;
+const PARTIAL_TR_MS = 1000;
 
 function showPartial(text) {
   if (!els.partial) return;
   clearTimeout(partialTimer);
   if (!text) {
+    // A late toSpanish resolution must not paint the previous phrase's Spanish
+    // under the next phrase's English: invalidate everything in flight.
+    partialTrShown = ++partialTrSeq;
     els.partial.hidden = true;
     els.partialEn.textContent = '';
     els.partialEs.textContent = '';
@@ -120,11 +131,14 @@ function showPartial(text) {
   els.partial.hidden = false;
   els.partialEn.textContent = text;
   if (settings.translate === false) return;
+  const wait = Math.max(0, PARTIAL_TR_MS - (Date.now() - partialTrAt));
   partialTimer = setTimeout(() => {
-    toSpanish(text).then((txt) => {
-      if (txt && els.partialEn.textContent === text) els.partialEs.textContent = txt;
+    partialTrAt = Date.now();
+    const id = ++partialTrSeq;
+    toSpanish(els.partialEn.textContent).then((txt) => {
+      if (txt && id > partialTrShown) { partialTrShown = id; els.partialEs.textContent = txt; }
     });
-  }, 500);
+  }, wait);
 }
 
 // One click copies the phrase: mid-conversation there is no time to select text

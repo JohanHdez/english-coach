@@ -137,7 +137,7 @@
     .foot button.ghost { background: #22262c; color: #e8eaed; border: 1px solid #2c3038; font-weight: 400; }
     .card.idle .reply-btn, .card.idle .stop-btn { display: none; }
     .card:not(.idle) .start-btn { display: none; }
-    .card.idle .turns, .card.idle .chips, .card.idle .nudge, .card.idle .reply { display: none; }
+    .card.idle .turns, .card.idle .chips, .card.idle .nudge, .card.idle .reply, .card.idle .hint-openers { display: none; }
   `;
 
   const host = document.createElement('div');
@@ -159,6 +159,9 @@
         <p class="status">Grabando…</p>
         <div class="chips"></div>
         <p class="nudge"></p>
+        <div class="hint-openers reply-group" hidden>
+          <span class="reply-label">Para arrancar</span><div class="reply-list"></div>
+        </div>
         <div class="reply">
           <p class="reply-status"></p>
           <div class="reply-group openers" hidden>
@@ -247,7 +250,7 @@
     turns.push(entry);
     const box = $('.turns');
     box.innerHTML = '';
-    for (const t of turns.slice(-12)) {
+    for (const t of [...turns].sort((a, b) => a.t - b.t).slice(-12)) {
       const div = document.createElement('div');
       div.className = 'turn ' + (t.speaker === 'me' ? 'me' : 'them');
       const who = document.createElement('span');
@@ -269,9 +272,16 @@
     box.scrollTop = box.scrollHeight;
   }
 
-  // Same as in the panel: interim results arrive word by word, so the provisional
-  // text is translated on a debounce.
+  // Interim results arrive word by word. A debounce would reset on every word and
+  // never fire while the speaker keeps talking — exactly when the translation is
+  // needed — so this throttles instead: at most one translation per second, always
+  // of the latest text, applied in order so a slow response cannot overwrite a
+  // newer one.
   let partialTimer = null;
+  let partialTrAt = 0;
+  let partialTrSeq = 0;
+  let partialTrShown = 0;
+  const PARTIAL_TR_MS = 1000;
 
   function showPartial(text) {
     const box = $('.partial');
@@ -279,6 +289,10 @@
     const es = $('.partial .es');
     clearTimeout(partialTimer);
     if (!text) {
+      // Invalidate any in-flight translation too: clearTimeout cannot cancel a
+      // promise, and a late resolution would paint the previous phrase's
+      // Spanish under the next phrase's English.
+      partialTrShown = ++partialTrSeq;
       box.hidden = true;
       en.textContent = '';
       es.textContent = '';
@@ -287,9 +301,14 @@
     box.hidden = false;
     en.textContent = text;
     if (!translateOn) return;
+    const wait = Math.max(0, PARTIAL_TR_MS - (Date.now() - partialTrAt));
     partialTimer = setTimeout(() => {
-      toSpanish(text).then((txt) => { if (txt && en.textContent === text) es.textContent = txt; });
-    }, 500);
+      partialTrAt = Date.now();
+      const id = ++partialTrSeq;
+      toSpanish(en.textContent).then((txt) => {
+        if (txt && id > partialTrShown) { partialTrShown = id; es.textContent = txt; }
+      });
+    }, wait);
   }
 
   function fillGroup(box, items) {
@@ -323,7 +342,13 @@
     fillGroup($('.reply-group.ideas'), pending || error ? [] : ideas);
   }
 
-  function showHints({ words = [], nudge = '' }) {
+  function showHints({ words = [], nudge = '', openers = [] }) {
+    // The openers ride on the same HINTS round: connectors to start answering
+    // appear by themselves after each turn, in their own slot. Rebuilt
+    // unconditionally so an error round (which carries no openers) clears the
+    // previous turn's instead of leaving them on screen looking current — and
+    // never in the reply box, whose openers/ideas pairing belongs to ⌘⇧E.
+    fillGroup($('.hint-openers'), openers);
     const chips = $('.chips');
     chips.innerHTML = '';
     for (const w of words) {

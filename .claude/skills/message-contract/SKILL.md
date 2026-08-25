@@ -49,7 +49,7 @@ overlay / sidepanel / setup ──► background ──► offscreen ──► w
 | `RUNNING` | `running` | overlay, sidepanel, and `background` to track session state |
 | `STATUS` | `text`, `kind` (`info`/`ok`/`error`/`loading`), `show?` to force the overlay open | overlay, sidepanel |
 | `SEGMENT` | `entry` (`speaker`, `text`, `t`, `dur`) | overlay, sidepanel |
-| `HINTS` | `words[]`, `nudge` | overlay, sidepanel |
+| `HINTS` | `words[]`, `openers[]` (each `{en, es}`), `nudge` | overlay, sidepanel |
 | `REPLY` | `openers[]`, `ideas[]` (each `{en, es}`), or `pending`, or `error` | overlay, sidepanel |
 | `QUEUE` | `pending` | overlay, sidepanel |
 | `PARTIAL` | `text` (English, provisional) | overlay, sidepanel |

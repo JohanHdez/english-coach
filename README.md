@@ -103,9 +103,12 @@ and the overlay itself inside the page.
 Two optional layers that need a free API key (section 3 of Settings).
 
 **During the conversation.** Each time the other person stops talking, a bar appears with 3–4
-expressions you are likely to need (`catch up on`, `off the top of my head`…) and a short nudge
-in Spanish about how to frame your answer. They are chips, not paragraphs: readable at a glance
-without losing the thread.
+expressions you are likely to need (`catch up on`, `off the top of my head`…), two or three
+ways to open your answer («The way it works is…»), and a short nudge in Spanish about how to
+frame it. They are chips, not paragraphs: readable at a glance without losing the thread. Long
+monologues are split at breath dips, so the transcript, its translation and the chips keep
+flowing while the other person is still talking instead of landing as one huge paragraph at
+the end.
 
 If you get stuck, `⌘⇧E` (or `Ctrl+Shift+E`) gives you options in **two groups**: *to get started*
 (connectors and phrases that buy you a second: «The way it works is…», «Let me walk you through
@@ -204,7 +207,9 @@ tab ────tabCapture───┐
                      ├─► AudioContext 16 kHz ─► AudioWorklet (100 ms blocks + RMS)
 mic ──getUserMedia───┘                              │
                                                     ▼
-                                    energy VAD → phrases of 0.9–18 s
+                             energy VAD → phrases of 0.9–18 s; long utterances
+                             split at breath dips (~4–6 s pieces) so text streams
+                             out while the speaker is still talking
                                                     │
                                      ┌──────────────┴──────────────┐
                                 Local Whisper                  Groq API
@@ -265,8 +270,12 @@ reload.
 
 ## Known limits
 
-- The VAD is energy-based: in very noisy places it may cut too aggressively. Tune `SILENCE_MS`
-  and the threshold in `segmenter.js`, or the «Intervenciones cortas» setting.
+- The VAD is energy-based: in very noisy places it may cut too aggressively. Tune `SILENCE_MS`,
+  `SOFT_CUT_MS` and the threshold in `segmenter.js`, or the «Intervenciones cortas» setting.
+- Pieces of a long monologue are transcribed independently, so Whisper tends to
+  capitalise and full-stop each one: a single flowing sentence may appear as two or
+  three fragments in the transcript. That is the deliberate trade for seeing the text
+  while the person is still talking.
 - No diarisation within a single track: if three people are on the call, they all come out as
   "Interlocutor".
 - Chrome's internal pages (`chrome://`, Web Store) cannot be captured.

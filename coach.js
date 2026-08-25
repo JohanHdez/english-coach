@@ -183,10 +183,14 @@ const REPORT_MAX_CHARS = 12000;
 // --- 1. Vocabulary chips after each of the other speaker's turns --------------
 
 const HINT_SYSTEM = `You help a Spanish-speaking professional keep up in a live English conversation.
-Given the recent turns, return 3 or 4 short items the learner is likely to need RIGHT NOW to answer:
-useful collocations, phrasal verbs or connectors — not full sentences, 1 to 4 words each.
-Also add one very short nudge (max 8 words, in Spanish) about how to steer the answer.
-Reply ONLY with JSON: {"words":[{"en":"...","es":"..."}],"nudge":"..."}`;
+Given the recent turns, return:
+"words": 3 or 4 short items the learner is likely to need RIGHT NOW to answer — useful
+collocations, phrasal verbs or connectors, not full sentences, 1 to 4 words each.
+"openers": 2 or 3 short natural ways to BEGIN answering what was just said — connectors or
+framing phrases, 2 to 6 words each, spoken register.
+"nudge": one very short hint (max 8 words, in Spanish) about how to steer the answer.
+Each words/openers item has "en" and "es" (Spanish gloss, max 5 words).
+Reply ONLY with JSON: {"words":[{"en":"...","es":"..."}],"openers":[{"en":"...","es":"..."}],"nudge":"..."}`;
 
 const HINT_SCHEMA = {
   type: 'object',
@@ -200,9 +204,18 @@ const HINT_SCHEMA = {
         additionalProperties: false,
       },
     },
+    openers: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: { en: { type: 'string' }, es: { type: 'string' } },
+        required: ['en', 'es'],
+        additionalProperties: false,
+      },
+    },
     nudge: { type: 'string' },
   },
-  required: ['words', 'nudge'],
+  required: ['words', 'openers', 'nudge'],
   additionalProperties: false,
 };
 
@@ -220,6 +233,7 @@ export async function askHints({ turns, settings }) {
   if (!parsed || !Array.isArray(parsed.words)) throw new CoachError('Respuesta de sugerencias no válida.');
   return {
     words: parsed.words.filter((w) => w && w.en).slice(0, 4),
+    openers: cleanItems(parsed.openers).slice(0, 3),
     nudge: typeof parsed.nudge === 'string' ? parsed.nudge : '',
   };
 }
