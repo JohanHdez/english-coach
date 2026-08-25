@@ -21,7 +21,7 @@ language. The codebase and its documentation are in English.
 > Not on the Chrome Web Store yet. It installs in developer mode: about a minute, no account, and
 > nothing to compile.
 
-1. **[Download the latest version (.zip)](https://github.com/JohanHdez/english-coach/archive/refs/tags/v1.13.0.zip)**
+1. **[Download the latest version (.zip)](https://github.com/JohanHdez/english-coach/archive/refs/tags/v1.14.0.zip)**
    and unzip it wherever you want to keep it — Desktop or Documents is fine. **Do not delete the
    folder afterwards**: Chrome loads the extension from there every time it starts.
 2. Open `chrome://extensions`.
