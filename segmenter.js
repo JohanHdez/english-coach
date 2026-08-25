@@ -142,3 +142,31 @@ export function isJunk(text) {
   if (bare.length <= 2 && !/^(no|ok|hi|so|i|a|do|go|up|we|he|it)$/i.test(bare)) return true;
   return FILLERS.test(bare);
 }
+
+// The VAD cuts by silence, not by ideas: a thinking pause splits one thought into
+// two segments, and each half would be shown — and translated — on its own.
+// Consecutive entries of the same speaker within MERGE_GAP_MS fold into the
+// previous turn (until it reaches MERGE_MAX_CHARS), so an idea reads as one block
+// and its translation covers the whole thought. Soft-cut monologue pieces keep
+// streaming with low latency; folding only changes what they land in.
+export const MERGE_GAP_MS = 7000;
+export const MERGE_MAX_CHARS = 400;
+
+// Compares against the chronologically latest entry, not the last appended one:
+// the transcription queue lets 'them' overtake 'me', so append order can disagree
+// with capture order. Returns the entry the UIs should paint (merged or new).
+export function foldIntoTranscript(transcript, entry, gapMs = MERGE_GAP_MS, maxChars = MERGE_MAX_CHARS) {
+  let last = null;
+  for (const e of transcript) if (!last || e.t > last.t) last = e;
+  const fits = last && last.speaker === entry.speaker
+    && entry.t >= last.t
+    && entry.t - (last.t + last.dur * 1000) <= gapMs
+    && last.text.length + entry.text.length < maxChars;
+  if (!fits) {
+    transcript.push(entry);
+    return entry;
+  }
+  last.text = `${last.text} ${entry.text}`.trim();
+  last.dur = Math.round((entry.t + entry.dur * 1000 - last.t) / 100) / 10;
+  return last;
+}

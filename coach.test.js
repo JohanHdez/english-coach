@@ -1,0 +1,88 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { parseReply, parseHints, turnsToText, contextBlock, CONTEXT_MAX_CHARS } from './coach.js';
+
+test('parseReply returns one speakable answer and two study ideas, cleaned', () => {
+  const raw = JSON.stringify({
+    answer: [{ en: '"I return a **503** error. Then I queue the request."', es: 'devuelvo un 503' }],
+    ideas: [{ en: 'idea one', es: '1' }, { en: 'idea two', es: '2' }, { en: 'idea three', es: '3' }],
+  });
+  const out = parseReply(raw);
+  assert.equal(out.answer.length, 1);
+  assert.equal(out.answer[0].en, 'I return a **503** error. Then I queue the request.');
+  assert.equal(out.ideas.length, 2);
+  assert.ok(!('openers' in out));
+});
+
+test('parseReply keeps only the first answer option', () => {
+  const item = (n) => ({ en: `Answer ${n}.`, es: `respuesta ${n}` });
+  const out = parseReply(JSON.stringify({ answer: [item(1), item(2)], ideas: [] }));
+  assert.equal(out.answer.length, 1);
+  assert.equal(out.answer[0].en, 'Answer 1.');
+});
+
+test('parseReply tolerates a model that omits the answer field', () => {
+  const raw = JSON.stringify({ ideas: [{ en: 'Just an idea.', es: 'una idea' }] });
+  const out = parseReply(raw);
+  assert.deepEqual(out.answer, []);
+  assert.equal(out.ideas.length, 1);
+});
+
+test('parseReply accepts JSON inside a markdown fence', () => {
+  const raw = '```json\n{"answer":[{"en":"It depends on the budget.","es":"depende del presupuesto"}],"ideas":[]}\n```';
+  assert.equal(parseReply(raw).answer[0].en, 'It depends on the budget.');
+});
+
+test('parseReply rejects unusable replies', () => {
+  assert.throws(() => parseReply('the model rambled with no JSON'));
+  assert.throws(() => parseReply(JSON.stringify({ answer: [], ideas: [] })));
+});
+
+test('turnsToText keeps the newest turns within the character budget', () => {
+  const turns = [
+    { speaker: 'them', text: 'First long question about signals in Angular.' },
+    { speaker: 'me', text: 'My previous answer.' },
+    { speaker: 'them', text: 'Second question.' },
+  ];
+  const all = turnsToText(turns, 10);
+  assert.ok(all.includes('First long question'));
+  const capped = turnsToText(turns, 10, 60);
+  assert.ok(capped.includes('LEARNER: My previous answer.'));
+  assert.ok(capped.includes('OTHER: Second question.'));
+  assert.ok(!capped.includes('First long question'));
+});
+
+test('turnsToText always keeps at least the last turn, even over budget', () => {
+  const turns = [{ speaker: 'them', text: 'A question far longer than any tiny budget allows.' }];
+  assert.ok(turnsToText(turns, 10, 5).includes('tiny budget'));
+});
+
+test('parseHints returns capped words, cleaned openers and the nudge', () => {
+  const raw = JSON.stringify({
+    words: [{ en: 'w1', es: '' }, { en: 'w2', es: '' }, { en: 'w3', es: '' }, { en: 'w4', es: '' }, { en: 'w5', es: '' }],
+    openers: [{ en: '"Well, the way I see it,"', es: 'bueno' }, { en: '', es: 'vacío' }],
+    nudge: 'directo y corto',
+  });
+  const out = parseHints(raw);
+  assert.equal(out.words.length, 4);
+  assert.equal(out.openers.length, 1);
+  assert.equal(out.openers[0].en, 'Well, the way I see it,');
+  assert.equal(out.nudge, 'directo y corto');
+});
+
+test('parseHints rejects a reply without words', () => {
+  assert.throws(() => parseHints(JSON.stringify({ openers: [], nudge: '' })));
+});
+
+test('contextBlock is empty when there are no notes', () => {
+  assert.equal(contextBlock({}), '');
+  assert.equal(contextBlock({ sessionContext: '   ' }), '');
+});
+
+test('contextBlock carries the notes, capped at the limit', () => {
+  const block = contextBlock({ sessionContext: 'Angular interview: signals, RxJS' });
+  assert.ok(block.includes('Angular interview: signals, RxJS'));
+  const long = contextBlock({ sessionContext: 'x'.repeat(CONTEXT_MAX_CHARS + 500) });
+  assert.ok(!long.includes('x'.repeat(CONTEXT_MAX_CHARS + 1)));
+  assert.ok(long.includes('x'.repeat(CONTEXT_MAX_CHARS)));
+});

@@ -154,3 +154,10 @@ footer .row button { flex: 1; }
 .reply-item b { font-weight: 600; }
 .reply-item i { display: block; color: var(--muted); font-size: 11px; font-style: italic; margin-top: 2px; }
 .reply-item.copied { border-color: var(--accent, #4c8bf5); }
+
+/* One answer, read out loud at a glance: big and calm, only the key term bold.
+   The study ideas stay small — they are for after the conversation. */
+#replyAnswer .reply-item { font-size: 15px; line-height: 1.5; }
+#replyAnswer .reply-item .rich b { font-weight: 700; }
+#replyIdeas .reply-item { font-size: 12px; }
+#replyIdeas .reply-item b { font-weight: 400; }

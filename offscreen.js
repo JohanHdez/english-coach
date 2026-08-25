@@ -1,9 +1,9 @@
 // Offscreen document: captures audio (tab + microphone), segments it by voice
 // and sends it to be transcribed (local Whisper or the Groq API).
 
-import { Segmenter, floatToWav, isJunk, SR } from './segmenter.js';
+import { Segmenter, floatToWav, isJunk, foldIntoTranscript, SR } from './segmenter.js';
 import { openCaptureStream } from './capture.js';
-import { askHints, askReply, askReport, groqBaseOf, redact, resolveProvider, PROVIDERS, DEFAULT_COACH } from './coach.js';
+import { askHints, askStarter, askReply, askReport, groqBaseOf, redact, resolveProvider, PROVIDERS, DEFAULT_COACH } from './coach.js';
 import { startLive, liveAvailability } from './live.js';
 
 const HINT_DEBOUNCE_MS = 1200;   // wait in case the other speaker keeps talking
@@ -28,6 +28,8 @@ const state = {
   hintTimer: null,
   hintBusy: false,
   lastHintAt: 0,
+  starterBusy: false,
+  replyBusy: false,
   live: null,
   liveTrack: null,
 };
@@ -63,10 +65,12 @@ function status(text, kind = 'info', extra = {}) {
 
 async function appendTranscript(entry) {
   const { transcript = [] } = (await store.get('transcript')) || {};
-  transcript.push(entry);
+  // The broadcast carries the folded turn: its `t` repeats when a turn was
+  // extended, and the UIs upsert by (speaker, t) instead of appending.
+  const shown = foldIntoTranscript(transcript, entry);
   state.turns = transcript;
   await store.set({ transcript });
-  broadcast({ type: 'SEGMENT', entry });
+  broadcast({ type: 'SEGMENT', entry: shown });
   if (entry.speaker === 'them') { state.live?.reset(); scheduleHints(); }
 }
 
@@ -96,16 +100,39 @@ function scheduleHints() {
   }, HINT_DEBOUNCE_MS);
 }
 
+// Opening chips built from the session context alone, before the other person
+// has said anything. Fired on start and on a mid-session context edit; once a
+// real hints round has painted (lastHintAt), the starter is stale and yields.
+// Failures stay silent on purpose: the first real hints round surfaces any key
+// or rate-limit problem, and an error toast at every session start would nag.
+async function sendStarter() {
+  if (!state.running || state.starterBusy) return;
+  const settings = await ensureSettings();
+  if (!settings.liveCoach || !(settings.sessionContext || '').trim()) return;
+  state.starterBusy = true;
+  try {
+    const hints = await askStarter({ settings });
+    if (state.running && !state.lastHintAt) broadcast({ type: 'HINTS', ...hints });
+  } catch { /* the real hints round will surface a missing key or a rate limit */ }
+  finally { state.starterBusy = false; }
+}
+
 async function suggestReply() {
+  // One request at a time: every click costs Groq tokens, and impatient
+  // re-clicks while "Pensando…" is on screen would burn the free minute.
+  if (state.replyBusy) return { ok: false, error: 'ya en curso' };
+  state.replyBusy = true;
   broadcast({ type: 'REPLY', pending: true });
   try {
-    const { openers, ideas } = await askReply({ turns: sortedTurns(), settings: await ensureSettings() });
-    broadcast({ type: 'REPLY', openers, ideas });
+    const { answer, ideas } = await askReply({ turns: sortedTurns(), settings: await ensureSettings() });
+    broadcast({ type: 'REPLY', answer, ideas });
     return { ok: true };
   } catch (e) {
     const error = 'No se pudo sugerir: ' + (e.message || e);
     broadcast({ type: 'REPLY', error });
     return { ok: false, error };
+  } finally {
+    state.replyBusy = false;
   }
 }
 
@@ -189,7 +216,7 @@ async function apiTranscribe(audio) {
   const form = new FormData();
   form.append('file', floatToWav(audio), 'audio.wav');
   form.append('model', state.settings.groqModel || 'whisper-large-v3-turbo');
-  form.append('language', 'en');
+  form.append('language', state.settings.lang === 'es' ? 'es' : 'en');
   form.append('response_format', 'json');
   const res = await fetch(`${groqBaseOf(state.settings)}/openai/v1/audio/transcriptions`, {
     method: 'POST',
@@ -354,6 +381,7 @@ async function start(streamId, settings, streamKind) {
       model: settings.model || 'onnx-community/whisper-base.en',
       device: settings.device || 'webgpu',
       base: chrome.runtime.getURL('vendor/'),
+      lang: settings.lang || 'en',
     });
   } else {
     status('Escuchando (Groq API)…', 'ok');
@@ -361,6 +389,7 @@ async function start(streamId, settings, streamKind) {
 
   state.running = true;
   broadcast({ type: 'RUNNING', running: true });
+  sendStarter();
   return { ok: true };
 }
 
@@ -368,7 +397,8 @@ async function start(streamId, settings, streamKind) {
 // English; each interface translates it on its own, because Translator's
 // availability inside an offscreen document is undocumented.
 async function startLiveLayer(themStream) {
-  const estado = await liveAvailability();
+  const lang = state.settings?.lang === 'es' ? 'es-ES' : 'en-US';
+  const estado = await liveAvailability(lang);
   if (estado !== 'available' && estado !== 'unknown') {
     broadcast({ type: 'LIVE_STATE', state: estado });
     return;
@@ -380,6 +410,7 @@ async function startLiveLayer(themStream) {
   state.liveTrack = track === source ? null : track;
   state.live = startLive({
     track,
+    lang,
     onText: (text) => broadcast({ type: 'PARTIAL', text }),
     onError: (code) => {
       broadcast({ type: 'PARTIAL', text: '' });
@@ -429,6 +460,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       if (msg.type === 'START') sendResponse(await start(msg.streamId, msg.settings, msg.streamKind));
       else if (msg.type === 'STOP') sendResponse(await stop());
       else if (msg.type === 'SUGGEST_REPLY') sendResponse(await suggestReply());
+      else if (msg.type === 'CONTEXT_CHANGED') { sendStarter(); sendResponse({ ok: true }); }
       else if (msg.type === 'REPORT') sendResponse(await makeReport(false));
       else if (msg.type === 'STATE') sendResponse({ running: state.running, pending: state.queue.length });
       else sendResponse({ ok: false, error: 'Mensaje desconocido' });

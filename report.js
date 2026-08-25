@@ -93,7 +93,8 @@ async function main() {
   });
 
   document.getElementById('download').addEventListener('click', () => {
-    const blob = new Blob([`# Informe de la sesión\n\n${report.markdown}\n\n---\n\n## Transcripción\n\n${report.transcript || ''}\n`], { type: 'text/markdown' });
+    // Without the charset, apps that default to Latin-1 render «Sesión» as «SesiÃ³n».
+    const blob = new Blob([`# Informe de la sesión\n\n${report.markdown}\n\n---\n\n## Transcripción\n\n${report.transcript || ''}\n`], { type: 'text/markdown;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;

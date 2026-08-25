@@ -1,8 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  Segmenter, isJunk, floatToWav,
+  Segmenter, isJunk, floatToWav, foldIntoTranscript,
   CHUNK_MS, SILENCE_MS, MAX_SEG_MS, SOFT_CUT_MS, SOFT_SILENCE_MS, MIN_VOICED,
+  MERGE_GAP_MS, MERGE_MAX_CHARS,
 } from './segmenter.js';
 
 const VOICE = 0.5;
@@ -124,4 +125,38 @@ test('floatToWav produces a valid 16 kHz mono PCM16 header', async () => {
   assert.equal(view.getUint32(24, true), 16000);       // sample rate
   assert.equal(view.getUint16(22, true), 1);           // mono
   assert.equal(view.getUint32(40, true), 1600 * 2);    // data length
+});
+
+test('same-speaker entries within the merge gap fold into one turn', () => {
+  const tr = [{ speaker: 'me', text: 'I think I need more', t: 1000, dur: 2 }];
+  const shown = foldIntoTranscript(tr, { speaker: 'me', text: 'fluency in English.', t: 4500, dur: 1.5 });
+  assert.equal(tr.length, 1);
+  assert.equal(tr[0].text, 'I think I need more fluency in English.');
+  assert.equal(shown, tr[0]);
+  assert.equal(tr[0].dur, 5);
+});
+
+test('a different speaker or a long silence starts a new turn', () => {
+  const tr = [{ speaker: 'me', text: 'Hello.', t: 0, dur: 1 }];
+  foldIntoTranscript(tr, { speaker: 'them', text: 'Hi.', t: 1500, dur: 1 });
+  assert.equal(tr.length, 2);
+  foldIntoTranscript(tr, { speaker: 'them', text: 'A later thought.', t: 2500 + MERGE_GAP_MS + 1000, dur: 1 });
+  assert.equal(tr.length, 3);
+});
+
+test('a merged turn stops growing at the character cap', () => {
+  const tr = [{ speaker: 'them', text: 'x'.repeat(MERGE_MAX_CHARS), t: 0, dur: 5 }];
+  foldIntoTranscript(tr, { speaker: 'them', text: 'more', t: 5500, dur: 1 });
+  assert.equal(tr.length, 2);
+});
+
+test('folding compares against the chronologically latest turn, not the last appended', () => {
+  // The transcription queue lets 'them' overtake 'me', so an older 'me' segment
+  // can be appended after a newer 'them' one.
+  const tr = [
+    { speaker: 'them', text: 'Question?', t: 10000, dur: 2 },
+    { speaker: 'me', text: 'Earlier words', t: 5000, dur: 1 },
+  ];
+  foldIntoTranscript(tr, { speaker: 'me', text: 'arriving late', t: 6500, dur: 1 });
+  assert.equal(tr.length, 3);
 });

@@ -21,7 +21,7 @@ language. The codebase and its documentation are in English.
 > Not on the Chrome Web Store yet. It installs in developer mode: about a minute, no account, and
 > nothing to compile.
 
-1. **[Download the latest version (.zip)](https://github.com/JohanHdez/english-coach/archive/refs/tags/v1.14.0.zip)**
+1. **[Download the latest version (.zip)](https://github.com/JohanHdez/english-coach/archive/refs/tags/v1.17.0.zip)**
    and unzip it wherever you want to keep it — Desktop or Documents is fine. **Do not delete the
    folder afterwards**: Chrome loads the extension from there every time it starts.
 2. Open `chrome://extensions`.
@@ -72,13 +72,17 @@ comes in through an input device (BlackHole), the panel button works fine.
 ## Where everything shows: the in-page overlay
 
 On any page there is a **discreet pill** at the bottom right («🎙 English Coach»). Clicking it
-opens the card without needing the toolbar icon or the side panel, which in some Chrome windows
-simply are not there.
+opens the card and **tries to start the session right away**: it starts with no shortcut when
+Chrome already lets the extension capture that tab (an earlier session or invocation on it), and
+always when the other speaker comes from an input device or only your microphone is recorded.
+Only the *first* capture of a tab's audio still needs the invocation Chrome insists on (see
+above) — in that case the card shows the shortcut instead of starting.
 
 The main interface is a **floating overlay inside the tab itself**: it appears when recording
-starts, drags from its header, **resizes from the bottom-right corner**, collapses with «–» and
-hides with «✕». It shows status, the coach's chips, the suggested reply and the recent turns,
-with buttons to ask for a reply and to stop.
+starts filling the screen's height, drags from its header, **resizes from the bottom-right
+corner**, collapses with «–» and hides with «✕». The coach stays pinned — chips and openers at
+the top, the suggested reply next to its button at the bottom — and only the conversation
+scrolls between them, so a long conversation never pushes the help out of sight.
 
 The bar **follows you**: if you switch tabs during a session it reappears in the new one, and if
 you reload the page it comes back with the turns and chips it already had. It only disappears
@@ -108,16 +112,19 @@ ways to open your answer («The way it works is…»), and a short nudge in Span
 frame it. They are chips, not paragraphs: readable at a glance without losing the thread. Long
 monologues are split at breath dips, so the transcript, its translation and the chips keep
 flowing while the other person is still talking instead of landing as one huge paragraph at
-the end.
+the end. On screen those pieces — and the fragments your own thinking pauses produce — **fold
+back into one block per idea**: consecutive segments of the same speaker close in time extend
+the previous turn instead of stacking a new one, and the translation is redone over the whole
+merged thought rather than fragment by fragment.
 
-If you get stuck, `⌘⇧E` (or `Ctrl+Shift+E`) gives you options in **two groups**: *to get started*
-(connectors and phrases that buy you a second: «The way it works is…», «Let me walk you through
-it») and *to say your idea* (complete sentences carrying the content, three different ways to
-express the same thing). One click copies the phrase. It works even while focus is on the meeting
-tab.
-
-The split matters because these are two different kinds of stuck: sometimes you don't know how to
-start, and sometimes you know what you mean in Spanish but not how to say it in English.
+If you get stuck, `⌘⇧E` (or `Ctrl+Shift+E`, or the «💡 Respuesta» button) gives you **one
+answer, not a menu**: in a live conversation you read the first option anyway, so alternatives
+are hesitation, not help. The answer is built to be read out loud — short sentences at your
+level, everyday words, at most one technical term (shown **bold** so you spot it mid-sentence)
+— and rendered big. Under it, two *richer versions with the precise terminology*, in small
+type: those are for studying after the conversation, not for reading live. Connectors to open
+your answer stay pinned above the conversation, where the live hints put them. One click copies
+any phrase. It works even while focus is on the meeting tab.
 
 **Your profile.** In Settings you can paste your experience as plain text (projects, tools,
 results). Without it, the suggested reply can only be generic: when someone asks «tell me what
@@ -127,14 +134,45 @@ figures that are not there — you are going to say this out loud as the truth. 
 suggested reply and the report, **not for the chips**: those run every six seconds, and repeating
 the profile in every round would exhaust the free tier's limit.
 
-**When you finish.** Pressing Stop generates the report automatically and opens it in a tab:
-summary, a grammar table with the correction and the reason, calques from Spanish, five
+**Today's context.** Next to the profile there is a per-meeting field — «Contexto de hoy» — for
+the topics of the conversation you are about to have: «entrevista técnica de Angular: signals,
+standalone components, RxJS». With it, when a **knowledge question** lands and you blank on the
+answer, the direct answer teaches you the right one, leaning on your notes plus the model's own
+knowledge of the subject; the biography rule still holds (it never invents your experience). It
+also feeds the report's meeting summary. It lives in Settings and in the side panel, and the
+side panel copy can be edited **mid-session**: the next suggested reply already uses it.
+
+The context also primes the session: when a session starts with notes in place, a one-off
+**starter round** of chips appears before the other person has said anything — connectors and
+phrases of that topic, and ways to open an answer. Editing the notes regenerates it, until the
+first real conversation round takes over. That single extra call aside, the context is sent
+only with the on-demand reply and the report, never with the periodic chips: those run every
+few seconds and would burn the free tier's minute.
+
+**Spanish sessions.** The side panel has a conversation-language selector. In Spanish mode the
+extension becomes professional support in your native language — a technical interview in
+Spanish, for example: transcription switches to the multilingual Whisper model (a new one-time
+download; the `.en` models only understand English), the live layer listens in Spanish (it
+needs Chrome's Spanish language pack), translation turns off (nothing to translate), the
+suggested answer and the starter chips arrive in Spanish, and the closing report changes from
+English teacher to **communication coach** — clarity, fillers, better phrasings and
+professional formulas instead of grammar tables and CEFR levels. The language is fixed while a
+session is running.
+
+**When you finish.** Pressing Stop generates the report automatically and opens it in a tab. It
+starts with a **meeting summary** — what was discussed and what was left pending (things agreed
+to review, send or decide), so the conversation's action items are not lost — and then the
+language coaching: how you did, a grammar table with the correction and the reason, calques from
+Spanish, connectors and set phrases worth memorising for this kind of conversation, five
 expressions that fitted and you did not use, filler words, and an approximate CEFR level with
-three exercises for the week. It downloads as `.md` so you can keep a history.
+three exercises for the week plus a coach's tip for the next conversation. It downloads as `.md`
+so you can keep a history.
 
 **One free Groq key covers everything.** Create it at
 [console.groq.com/keys](https://console.groq.com/keys): no credit card. That is what ships by
-default, both for live suggestions (`gpt-oss-20b`, ~1 s) and for the report (`gpt-oss-120b`).
+default: `gpt-oss-20b` (~1 s) for the chips, and `gpt-oss-120b` for the report **and for the
+on-demand suggested reply** — it is asked for once, not every few seconds, so the stronger
+model's extra second is worth it, especially for technical answers.
 
 Groq's free tier allows 30 requests per minute and 8000 tokens per minute. Comfortably enough:
 suggestions have a six-second cooldown between rounds, and the report trims the transcript to fit
@@ -197,6 +235,8 @@ the API engine, and text only leaves if you enable the coach.
 | Report | Automatic on stop, or on demand with «Informe de la sesión» |
 | Separate window | Off by default: the coach lives inside the page. Turn it on if you are sharing the tab or want the coach on another monitor |
 | Your profile | Plain-text experience (max 1500 characters) so the suggested reply talks about what you actually did |
+| Today's context | Per-meeting notes (max 1500 characters) so the direct answer can also answer knowledge questions; editable mid-session from the side panel |
+| Conversation language | English (coach + translation) or Spanish (professional support: multilingual model, Spanish suggestions, communication-coach report); in the side panel, per session |
 | Coach models | Groq (`gpt-oss-20b/120b`, **free**) and Claude (`haiku-4-5`, `sonnet-5`, `opus-5`, **paid**), selectable separately |
 | Shortcuts | `⌘⇧S` start/stop · `⌘⇧E` suggested reply. Change them at `chrome://extensions/shortcuts` |
 
@@ -237,17 +277,47 @@ not `chrome.storage`. That is why all of its storage goes through the service wo
 **«Chrome no autorizó la captura de esta pestaña» / «Extension has not been invoked».** Chrome
 only allows capturing a tab where the extension was *invoked*, and that permission is lost as
 soon as the page navigates. Go to the meeting tab and press `⌘⇧S`, or use the extension icon, or
-the context menu. A button inside the page cannot do it — since v1.11.0 the overlay says so
-instead of failing.
+the context menu. A button inside the page cannot grant it — since v1.15.0 the pill and the
+overlay's start button *try* anyway (it works when the extension was already invoked on that
+tab, and always when the source is not the tab) and show these instructions only when Chrome
+refuses.
+
+**The reply box showed `[object Object]` after switching back to the session tab.** Fixed in
+v1.15.0: re-injecting the overlay replayed the cached reply over the box's structure instead of
+through the renderer.
+
+**One idea appeared as five tiny blocks, each translated on its own.** The recorder cuts by
+silence, so thinking pauses split a thought and long monologues stream out in ~4–6 s pieces.
+Since v1.15.1 consecutive segments of the same speaker close in time fold back into one turn on
+screen and in the transcript, and the translation is redone over the merged thought. The
+segments still arrive one by one — that is the streaming working — they just extend the same
+block instead of stacking.
 
 **`chrome://` pages, the Web Store and the extension's own pages cannot be captured.** That is a
 browser-level block.
+
+**«Error transcribiendo: Can't create a session … Missing required scale … DequantizeLinear».**
+A regression in ONNX Runtime 1.25+ (the engine bundled in `vendor/`) rejects every old q8
+quantized Whisper decoder, whose tied-embedding weights share their quantization scales. Since
+v1.15.3 the worker skips q8 entirely and loads the q4 decoder (verified against the bundled
+runtime; roughly double the q8 download, cached after the first time), falling back to fp32 if
+even that fails. A failed load now shows its real cause on every segment (`[modelo] …`) instead
+of «El modelo no se ha inicializado», and retries by itself once a minute. The upstream fix
+ships in onnxruntime-web 1.27; when a transformers.js build bundles it, refreshing `vendor/`
+restores the small q8 download.
 
 **`RESULT_CODE_KILLED_BAD_MESSAGE` / «Aw, Snap!» when recording starts.** Fixed in v1.4.1. When
 the audio comes from Chrome's native picker (`desktopCapture`), video must be requested alongside
 audio: asking for audio only does not return an error, it makes the browser process kill the
 renderer. A minimal video track (160×120 at 1 fps) is now always requested and discarded as soon
 as the stream arrives.
+
+**The card freezes («Iniciando captura…») or logs `Extension context invalidated` after
+updating the extension.** Reloading the extension orphans the overlay already injected into
+open tabs: its `chrome.runtime` is gone, so its buttons can only fail. Reload the page (or
+start a session from the toolbar icon, which injects a fresh overlay). Since v1.15.4 the fresh
+copy detects the dead one and replaces it, and an orphaned card's buttons say «Recarga la
+página» instead of freezing.
 
 **Two English Coach cards appear on the same page, and one does not work.** You have more than
 one copy of the folder loaded in `chrome://extensions`. Unpacked extension IDs depend on the

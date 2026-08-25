@@ -140,6 +140,20 @@ if (chrome.commands?.onCommand) {
   });
 }
 
+// The offscreen document re-reads settings on every coach call, but the starter
+// kit is event-driven: forward the edit so notes typed mid-session (side panel
+// or Settings) regenerate the opening chips. The offscreen document decides
+// whether a session is actually running — module state here is ephemeral.
+chrome.storage.onChanged.addListener(async (changes, area) => {
+  if (area !== 'local' || !changes.settings) return;
+  const antes = changes.settings.oldValue?.sessionContext || '';
+  const ahora = changes.settings.newValue?.sessionContext || '';
+  if (antes === ahora) return;
+  if (await hasOffscreen()) {
+    chrome.runtime.sendMessage({ target: 'offscreen', type: 'CONTEXT_CHANGED' }).catch(() => {});
+  }
+});
+
 async function hasOffscreen() {
   const contexts = await chrome.runtime.getContexts({
     contextTypes: ['OFFSCREEN_DOCUMENT'],
@@ -335,10 +349,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             await startCapture(merged);
           } catch (e) {
             // The panel may have vanished when sharing: leave a visible trace.
+            // quiet comes from the overlay, which paints the error itself — a
+            // notification and a popup window on top of it would be noise.
             const text = e.message || String(e);
             await chrome.storage.local.set({ lastError: { text, at: Date.now() } });
-            await notify(text);
-            if (merged.floatingWindow === true) await openCoachWindow();
+            if (!msg.quiet) {
+              await notify(text);
+              if (merged.floatingWindow === true) await openCoachWindow();
+            }
             throw e;
           }
           if (merged.floatingWindow === true) await openCoachWindow();
@@ -372,8 +390,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             hints: lastUi.hints,
             reply: lastUi.reply,
             status: lastUi.status,
-            translate: settings.translate !== false,
-            themSource: settings.themSource || 'tab',
+            translate: settings.translate !== false && settings.lang !== 'es',
           });
           break;
         }

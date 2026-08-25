@@ -3,15 +3,21 @@
 // DOM so the host site's CSS cannot touch it.
 
 (() => {
-  // Every re-injection (session start, tab switch) is a chance to evict the overlay
-  // of an older copy that mounted after us.
-  if (window.__englishCoachOverlay) {
-    try { window.__englishCoachEvict?.(); } catch { /* nada que desalojar */ }
-    return;
-  }
-
   const HOST_ID = 'english-coach-overlay';
   const VERSION = chrome.runtime.getManifest().version;
+
+  // Re-injection guard. Only a LIVE copy of this same extension may keep the
+  // page: it proves itself by answering the ping with the current runtime id.
+  // A copy left behind by an extension reload still has its DOM and globals,
+  // but its chrome.runtime is dead — every button throws "Extension context
+  // invalidated" — so it must be replaced, not deferred to.
+  try {
+    const prev = window.__englishCoachOverlay;
+    if (typeof prev?.ping === 'function' && prev.ping() === chrome.runtime.id) {
+      prev.evict?.();
+      return;
+    }
+  } catch { /* a dead copy throws on ping: replace it below */ }
 
   const cmpVersion = (a, b) => {
     const pa = String(a).split('.').map(Number);
@@ -24,21 +30,23 @@
   };
 
   // An unpacked copy is a different extension to Chrome, with its own isolated
-  // world: the guard above cannot see the others. The DOM is shared, though, so
-  // copies recognise each other by the host id and the newest one wins. Without
-  // this, two loaded folders paint two overlays and the old copy's does not work.
-  const cedeAnte = (rival) => rival && rival !== host && cmpVersion(rival.dataset.version || '0', VERSION) >= 0;
-  const rivalInicial = document.getElementById(HOST_ID);
-  if (rivalInicial && cmpVersion(rivalInicial.dataset.version || '0', VERSION) >= 0) return;
-  if (rivalInicial) rivalInicial.remove();
+  // world: the ping above cannot see those. The DOM is shared, though, so copies
+  // recognise each other by the host id and the newest one wins. Same-or-older
+  // hosts are removed — after a reload the previous card is dead DOM that no
+  // script will drive again.
+  const cedeAnte = (rival) => rival && rival !== host && cmpVersion(rival.dataset.version || '0', VERSION) > 0;
+  for (const otro of document.querySelectorAll('#' + HOST_ID)) {
+    if (cmpVersion(otro.dataset.version || '0', VERSION) <= 0) otro.remove();
+  }
+  if (document.getElementById(HOST_ID)) return; // a strictly newer copy owns the page
 
-  window.__englishCoachOverlay = true;
+  window.__englishCoachOverlay = { version: VERSION, ping: () => chrome.runtime.id };
 
   const CSS = `
     :host { all: initial; }
     .card {
       position: fixed; right: 16px; bottom: 16px; z-index: 2147483647;
-      width: 380px; height: 520px; max-height: 88vh; max-width: 92vw;
+      width: 380px; height: calc(100vh - 32px); max-height: calc(100vh - 32px); max-width: 92vw;
       min-width: 280px; min-height: 220px; resize: both;
       display: none; flex-direction: column;
       background: #16181c; color: #e8eaed; border: 1px solid #2c3038;
@@ -47,6 +55,8 @@
       overflow: hidden;
     }
     .card.show { display: flex; }
+    /* Idle shows only status and the start button: full height is for sessions. */
+    .card.idle { height: auto; }
 
     /* Discreet pill when no session is running: the way to start without
        depender de la barra de extensiones ni del panel lateral. */
@@ -84,7 +94,10 @@
     }
     .head button:hover { color: #e8eaed; }
 
-    .body { padding: 9px 10px; overflow-y: auto; flex: 1; }
+    /* Only the turns scroll: the coach (chips, openers, reply) stays pinned, or
+       a growing conversation pushes the help out of sight — exactly when the
+       learner needs it. */
+    .body { padding: 9px 10px; flex: 1; display: flex; flex-direction: column; overflow: hidden; min-height: 0; }
     .status { color: #9aa0a6; font-size: 11px; margin: 0 0 7px; }
     .status.error { color: #ef6a5c; }
     .status.ok { color: #51cf66; }
@@ -99,11 +112,21 @@
     .nudge { color: #9aa0a6; font-style: italic; font-size: 11.5px; margin: 7px 0 0; }
     .nudge:empty { display: none; }
 
+    /* Hidden by a class, not :empty — the box always holds its status and group
+       skeleton, so :empty never matches and an idle blue strip would show. */
     .reply {
       margin-top: 9px; padding: 8px 9px; border-radius: 8px;
       background: #1e3a5f; border: 1px solid #2b5288; font-size: 13px;
+      display: none; max-height: 40%; flex: none; position: relative;
     }
-    .reply:empty { display: none; }
+    .reply.show { display: flex; flex-direction: column; }
+    .reply-scroll { overflow-y: auto; min-height: 0; padding-right: 14px; }
+    .reply-close {
+      position: absolute; top: 4px; right: 5px; z-index: 1;
+      background: transparent; border: none; color: #9aa0a6;
+      font-size: 11px; cursor: pointer; padding: 2px 4px;
+    }
+    .reply-close:hover { color: #e8eaed; }
     .reply-status { color: #9aa0a6; font-size: 12px; }
     .reply-group { margin-top: 7px; }
     .reply-label { display: block; font-size: 10px; color: #9aa0a6;
@@ -119,7 +142,21 @@
     .reply-item b { font-weight: 600; }
     .reply-item i { display: block; color: #9aa0a6; font-size: 11px; margin-top: 2px; }
 
-    .turns { margin-top: 10px; display: flex; flex-direction: column; gap: 5px; }
+    /* The openers pinned above the conversation render as one wrapping chip
+       row: full-width two-line rows would eat the height the turns need. */
+    .hint-openers .reply-list { flex-direction: row; flex-wrap: wrap; }
+    .hint-openers .reply-item { width: auto; border-radius: 999px; padding: 3px 10px; font-size: 12px; }
+    .hint-openers .reply-item i { display: inline; margin: 0 0 0 5px; }
+
+    /* One answer, read out loud at a glance: big and calm, only the key term
+       bold. The study ideas stay small — they are for after the conversation. */
+    .reply-group.answer .reply-item { font-size: 15px; line-height: 1.5; }
+    .reply-group.answer .reply-item .rich b { font-weight: 700; }
+    .reply-group.ideas .reply-item { font-size: 11.5px; opacity: .9; }
+    .reply-group.ideas .reply-item b { font-weight: 400; }
+
+    .turns { margin-top: 10px; display: flex; flex-direction: column; gap: 5px;
+      flex: 1; min-height: 0; overflow-y: auto; }
     .turn { font-size: 12px; padding: 5px 8px; border-radius: 8px; background: #24272d; }
     .turn.me { background: #1e3a5f; }
     .turn span { display: block; font-size: 10px; color: #9aa0a6; }
@@ -162,17 +199,20 @@
         <div class="hint-openers reply-group" hidden>
           <span class="reply-label">Para arrancar</span><div class="reply-list"></div>
         </div>
-        <div class="reply">
-          <p class="reply-status"></p>
-          <div class="reply-group openers" hidden>
-            <span class="reply-label">Para arrancar</span><div class="reply-list"></div>
-          </div>
-          <div class="reply-group ideas" hidden>
-            <span class="reply-label">Para decir tu idea</span><div class="reply-list"></div>
-          </div>
-        </div>
         <div class="turns"></div>
         <div class="partial" hidden><span class="partial-en"></span><span class="es"></span></div>
+        <div class="reply">
+          <button class="reply-close" title="Cerrar sugerencia">✕</button>
+          <div class="reply-scroll">
+            <p class="reply-status"></p>
+            <div class="reply-group answer" hidden>
+              <span class="reply-label">Di esto</span><div class="reply-list"></div>
+            </div>
+            <div class="reply-group ideas" hidden>
+              <span class="reply-label">Para estudiar después</span><div class="reply-list"></div>
+            </div>
+          </div>
+        </div>
       </div>
       <div class="foot">
         <button class="start-btn">● Empezar a transcribir</button>
@@ -190,7 +230,6 @@
   const pill = $('.pill');
 
   let translateOn = true;
-  let themSource = 'tab';
 
   // Local copy of translate.js: a content script cannot import modules.
   let translator = null;
@@ -247,7 +286,11 @@
   }
 
   function addTurn(entry) {
-    turns.push(entry);
+    // A repeated (speaker, t) is a turn that grew by folding: replace it. The
+    // fresh object has no cached `es`, so the merged text is retranslated whole.
+    const i = turns.findIndex((x) => x.t === entry.t && x.speaker === entry.speaker);
+    if (i >= 0) turns[i] = entry;
+    else turns.push(entry);
     const box = $('.turns');
     box.innerHTML = '';
     for (const t of [...turns].sort((a, b) => a.t - b.t).slice(-12)) {
@@ -311,16 +354,33 @@
     }, wait);
   }
 
-  function fillGroup(box, items) {
+  // The answer's **key term** arrives marked in double asterisks: rendered bold,
+  // stripped when copying. Everything goes in via createElement, never innerHTML.
+  function richText(el, text) {
+    String(text).split('**').forEach((part, i) => {
+      if (!part) return;
+      if (i % 2) { const b = document.createElement('b'); b.textContent = part; el.append(b); }
+      else el.append(document.createTextNode(part));
+    });
+  }
+
+  function fillGroup(box, items, rich = false) {
     const list = box.querySelector('.reply-list');
     list.innerHTML = '';
     box.hidden = !items.length;
     for (const item of items) {
       const btn = document.createElement('button');
       btn.className = 'reply-item';
-      const en = document.createElement('b');
-      en.textContent = item.en;
-      btn.append(en);
+      if (rich) {
+        const en = document.createElement('span');
+        en.className = 'rich';
+        richText(en, item.en);
+        btn.append(en);
+      } else {
+        const en = document.createElement('b');
+        en.textContent = item.en.replace(/\*\*/g, '');
+        btn.append(en);
+      }
       if (item.es) {
         const es = document.createElement('i');
         es.textContent = item.es;
@@ -328,18 +388,19 @@
       }
       // One click copies: mid-conversation there is no time to select text.
       btn.addEventListener('click', () => {
-        navigator.clipboard.writeText(item.en).catch(() => {});
+        navigator.clipboard.writeText(item.en.replace(/\*\*/g, '')).catch(() => {});
         btn.classList.add('copied');
       });
       list.append(btn);
     }
   }
 
-  function showReply({ openers = [], ideas = [], pending = false, error = '' } = {}) {
+  function showReply({ answer = [], ideas = [], pending = false, error = '' } = {}) {
     const aviso = pending ? 'Pensando…' : error;
     $('.reply-status').textContent = aviso;
-    fillGroup($('.reply-group.openers'), pending || error ? [] : openers);
+    fillGroup($('.reply-group.answer'), pending || error ? [] : answer, true);
     fillGroup($('.reply-group.ideas'), pending || error ? [] : ideas);
+    $('.reply').classList.toggle('show', !!(aviso || answer.length || ideas.length));
   }
 
   function showHints({ words = [], nudge = '', openers = [] }) {
@@ -390,7 +451,38 @@
     ? 'Para el audio de esta pestaña, pulsa ⌘⇧S (Chrome sólo lo permite así).'
     : 'Para el audio de esta pestaña, pulsa Ctrl+Shift+S (Chrome sólo lo permite así).';
 
-  pill.addEventListener('click', () => { show(true); setStatus(HINT_ATAJO); ensureTranslator(); });
+  // After an extension reload, this copy's chrome.runtime dies and sendMessage
+  // throws SYNCHRONOUSLY — a .catch on its promise never sees it. Route every
+  // send through here so an orphaned card says what to do instead of freezing.
+  const MSG_RECARGA = 'La extensión se actualizó. Recarga la página para reconectar el coach.';
+  const invalidated = (e) => /context invalidated/i.test(String(e?.message || e));
+
+  // Chrome only grants tab-audio capture to an extension invocation (icon,
+  // shortcut, context menu); a click inside the page does not count. The click
+  // still tries START: if the extension was already invoked on this tab (an
+  // earlier session, the icon) the pill starts the session by itself, and any
+  // non-tab source starts unconditionally. Only when Chrome refuses does the
+  // card fall back to the shortcut instructions. quiet: the error is painted
+  // here, so the service worker must not also fire a system notification.
+  let starting = false;
+  async function tryStart() {
+    if (starting) return;
+    starting = true;
+    show(true);
+    setStatus('Iniciando captura…');
+    try {
+      ensureTranslator();
+      const res = await chrome.runtime.sendMessage({ type: 'START', quiet: true });
+      if (res && res.ok) { setMode('running'); setStatus('Grabando…', 'ok'); }
+      else setStatus(res?.error || HINT_ATAJO, 'error');
+    } catch (e) {
+      setStatus(invalidated(e) ? MSG_RECARGA : String(e?.message || e), 'error');
+    } finally {
+      starting = false;
+    }
+  }
+
+  pill.addEventListener('click', tryStart);
   $('.min-btn').addEventListener('click', () => card.classList.toggle('min'));
   $('.close-btn').addEventListener('click', () => {
     card.classList.remove('show');
@@ -398,22 +490,23 @@
     pill.classList.remove('hide');
   });
 
-  $('.start-btn').addEventListener('click', async () => {
-    if (themSource === 'tab') {
-      setStatus(HINT_ATAJO, 'error');
-      return;
-    }
-    setStatus('Iniciando captura…');
-    const res = await chrome.runtime.sendMessage({ type: 'START' }).catch((e) => ({ error: String(e) }));
-    if (res && res.ok) { setMode('running'); setStatus('Grabando…', 'ok'); }
-    else setStatus(res?.error || 'No se pudo iniciar.', 'error');
-  });
+  $('.start-btn').addEventListener('click', tryStart);
+  // Done reading the suggestion: give its space back to the conversation.
+  $('.reply-close').addEventListener('click', () => showReply({}));
   $('.reply-btn').addEventListener('click', () => {
-    showReply({ pending: true });
-    chrome.runtime.sendMessage({ type: 'SUGGEST_REPLY' }).catch(() => {});
+    try {
+      showReply({ pending: true });
+      chrome.runtime.sendMessage({ type: 'SUGGEST_REPLY' }).catch(() => {});
+    } catch (e) {
+      if (invalidated(e)) { showReply({}); setStatus(MSG_RECARGA, 'error'); }
+    }
   });
   $('.stop-btn').addEventListener('click', () => {
-    chrome.runtime.sendMessage({ type: 'STOP' }).catch(() => {});
+    try {
+      chrome.runtime.sendMessage({ type: 'STOP' }).catch(() => {});
+    } catch (e) {
+      if (invalidated(e)) setStatus(MSG_RECARGA, 'error');
+    }
   });
 
   // --- messages from the rest of the extension -----------------------------
@@ -438,15 +531,15 @@
 
   setMode('idle');
 
-  // Evicts overlays from older copies. getElementById returns only the first, so
-  // we walk them all in case duplicate ids ended up in the DOM.
+  // Evicts overlays from same-or-older copies. getElementById returns only the
+  // first, so we walk them all in case duplicate ids ended up in the DOM.
   const evict = () => {
     for (const otro of document.querySelectorAll('#' + HOST_ID)) {
       if (otro === host) continue;
-      if (cmpVersion(otro.dataset.version || '0', VERSION) < 0) otro.remove();
+      if (cmpVersion(otro.dataset.version || '0', VERSION) <= 0) otro.remove();
     }
   };
-  window.__englishCoachEvict = evict;
+  window.__englishCoachOverlay.evict = evict;
 
   const mount = () => {
     // The check is repeated: the other copy may have mounted its overlay between
@@ -465,7 +558,6 @@
     .then((st) => {
       if (!st) return;
       translateOn = st.translate !== false;
-      themSource = st.themSource || 'tab';
       if (st.reply) showReply(st.reply);
       if (!st.running) return;
       setMode('running');
@@ -473,7 +565,6 @@
       setStatus('Grabando…', 'ok');
       for (const t of st.turns || []) addTurn(t);
       if (st.hints) showHints(st.hints);
-      if (st.reply) $('.reply').textContent = st.reply;
     })
     .catch(() => {});
 })();

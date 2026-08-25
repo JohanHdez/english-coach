@@ -1,15 +1,16 @@
-import { DEFAULT_COACH } from './coach.js';
+import { DEFAULT_COACH, CONTEXT_MAX_CHARS } from './coach.js';
 import { toSpanish } from './translate.js';
 
 const $ = (id) => document.getElementById(id);
 
 const els = {
   dot: $('dot'), toggle: $('toggle'), status: $('status'), transcript: $('transcript'),
+  lang: $('lang'),
   themSource: $('themSource'), themDevice: $('themDevice'), deviceField: $('deviceField'),
-  captureMic: $('captureMic'), settings: $('settings'),
+  captureMic: $('captureMic'), settings: $('settings'), sessionContext: $('sessionContext'),
   coach: $('coach'), chips: $('chips'), nudge: $('nudge'), hintOpeners: $('hintOpeners'), askReply: $('askReply'),
   replyBox: $('replyBox'), replyStatus: $('replyStatus'),
-  replyOpeners: $('replyOpeners'), replyIdeas: $('replyIdeas'),
+  replyAnswer: $('replyAnswer'), replyIdeas: $('replyIdeas'),
   report: $('report'), analyze: $('analyze'), download: $('download'), clear: $('clear'),
   openWindow: $('openWindow'),
   partial: $('partial'), partialEn: $('partialEn'), partialEs: $('partialEs'),
@@ -34,6 +35,8 @@ Transcripción:
 
 const fmtTime = (t) => new Date(t).toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 const sorted = () => [...entries].sort((a, b) => a.t - b.t);
+// In a Spanish session the learner is the native speaker: nothing to translate.
+const traducir = () => settings.translate !== false && settings.lang !== 'es';
 
 function render() {
   els.transcript.innerHTML = '';
@@ -50,7 +53,7 @@ function render() {
     const p = document.createElement('span');
     p.textContent = e.text;
     div.append(meta, p);
-    if (e.speaker !== 'me' && settings.translate !== false) {
+    if (e.speaker !== 'me' && traducir()) {
       const es = document.createElement('span');
       es.className = 'es';
       div.append(es);
@@ -78,6 +81,8 @@ function setRunning(v) {
   els.dot.classList.toggle('on', v);
   els.toggle.textContent = v ? '■ Detener' : '● Empezar';
   els.toggle.classList.toggle('stop', v);
+  // Mid-session the language cannot change: the Whisper model is already loaded.
+  els.lang.disabled = v;
   els.themSource.disabled = v;
   els.themDevice.disabled = v;
   els.captureMic.disabled = v;
@@ -130,7 +135,7 @@ function showPartial(text) {
   }
   els.partial.hidden = false;
   els.partialEn.textContent = text;
-  if (settings.translate === false) return;
+  if (!traducir()) return;
   const wait = Math.max(0, PARTIAL_TR_MS - (Date.now() - partialTrAt));
   partialTimer = setTimeout(() => {
     partialTrAt = Date.now();
@@ -141,39 +146,57 @@ function showPartial(text) {
   }, wait);
 }
 
+// The answer's **key term** arrives marked in double asterisks: rendered bold,
+// stripped when copying. Everything goes in via createElement, never innerHTML.
+function richText(el, text) {
+  String(text).split('**').forEach((part, i) => {
+    if (!part) return;
+    if (i % 2) { const b = document.createElement('b'); b.textContent = part; el.append(b); }
+    else el.append(document.createTextNode(part));
+  });
+}
+
 // One click copies the phrase: mid-conversation there is no time to select text
 // with the mouse.
-function fillGroup(box, items) {
+function fillGroup(box, items, rich = false) {
   const list = box.querySelector('.reply-list');
   list.innerHTML = '';
   box.hidden = !items.length;
   for (const item of items) {
     const btn = document.createElement('button');
     btn.className = 'reply-item small';
-    const en = document.createElement('b');
-    en.textContent = item.en;
-    btn.append(en);
+    if (rich) {
+      const en = document.createElement('span');
+      en.className = 'rich';
+      richText(en, item.en);
+      btn.append(en);
+    } else {
+      const en = document.createElement('b');
+      en.textContent = item.en.replace(/\*\*/g, '');
+      btn.append(en);
+    }
     if (item.es) {
       const es = document.createElement('i');
       es.textContent = item.es;
       btn.append(es);
     }
     btn.addEventListener('click', async () => {
-      await navigator.clipboard.writeText(item.en);
+      const texto = item.en.replace(/\*\*/g, '');
+      await navigator.clipboard.writeText(texto);
       btn.classList.add('copied');
-      setStatus('Copiado: ' + item.en, 'ok');
+      setStatus('Copiado: ' + texto, 'ok');
     });
     list.append(btn);
   }
 }
 
-function showReply({ openers = [], ideas = [], pending = false, error = '' } = {}) {
+function showReply({ answer = [], ideas = [], pending = false, error = '' } = {}) {
   els.coach.hidden = false;
   els.replyBox.hidden = false;
   const aviso = pending ? 'Pensando…' : error;
   els.replyStatus.textContent = aviso;
   els.replyStatus.hidden = !aviso;
-  fillGroup(els.replyOpeners, pending || error ? [] : openers);
+  fillGroup(els.replyAnswer, pending || error ? [] : answer, true);
   fillGroup(els.replyIdeas, pending || error ? [] : ideas);
 }
 
@@ -211,9 +234,11 @@ async function saveUi() {
   const { settings: stored = {} } = await chrome.storage.local.get('settings');
   const next = {
     ...stored,
+    lang: els.lang.value,
     themSource: els.themSource.value,
     themDeviceId: els.themDevice.value || null,
     captureMic: els.captureMic.checked,
+    sessionContext: els.sessionContext.value.trim().slice(0, CONTEXT_MAX_CHARS),
   };
   await chrome.storage.local.set({ settings: next });
   settings = { ...DEFAULT_COACH, ...next };
@@ -228,8 +253,10 @@ async function init() {
   const { settings: stored = {}, transcript = [], lastError } =
     await chrome.storage.local.get(['settings', 'transcript', 'lastError']);
   settings = { ...DEFAULT_COACH, ...stored };
+  els.lang.value = settings.lang || 'en';
   els.themSource.value = settings.themSource || 'tab';
   els.captureMic.checked = settings.captureMic !== false;
+  els.sessionContext.value = settings.sessionContext || '';
   entries = transcript;
   render();
   await loadDevices();
@@ -249,12 +276,17 @@ async function init() {
 
 // ------------------------------------------------------------------ events
 
+els.lang.addEventListener('change', saveUi);
 els.themSource.addEventListener('change', async () => {
   els.deviceField.hidden = els.themSource.value !== 'device';
   await saveUi();
 });
 els.themDevice.addEventListener('change', saveUi);
 els.captureMic.addEventListener('change', saveUi);
+// Unlike the source controls, the context stays enabled during a session on
+// purpose: the offscreen document re-reads settings on every coach call, so
+// notes edited mid-interview reach the very next suggested reply.
+els.sessionContext.addEventListener('change', saveUi);
 
 els.toggle.addEventListener('click', async () => {
   if (running) {
@@ -288,7 +320,8 @@ els.analyze.addEventListener('click', async () => {
 });
 
 els.download.addEventListener('click', () => {
-  const blob = new Blob([`# Conversación\n\n${toMarkdown()}\n`], { type: 'text/markdown' });
+  // Without the charset, apps that default to Latin-1 render «Sesión» as «SesiÃ³n».
+  const blob = new Blob([`# Conversación\n\n${toMarkdown()}\n`], { type: 'text/markdown;charset=utf-8' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
@@ -309,7 +342,14 @@ els.clear.addEventListener('click', async () => {
 
 chrome.runtime.onMessage.addListener((msg) => {
   if (msg.target !== 'ui') return;
-  if (msg.type === 'SEGMENT') { entries.push(msg.entry); render(); }
+  if (msg.type === 'SEGMENT') {
+    // A repeated (speaker, t) is a turn extended by folding: replace it, which
+    // also drops the cached translation so the whole merged text retranslates.
+    const i = entries.findIndex((e) => e.t === msg.entry.t && e.speaker === msg.entry.speaker);
+    if (i >= 0) entries[i] = msg.entry;
+    else entries.push(msg.entry);
+    render();
+  }
   else if (msg.type === 'PARTIAL') showPartial(msg.text);
   else if (msg.type === 'LIVE_STATE') {
     if (msg.state !== 'available') showPartial('');

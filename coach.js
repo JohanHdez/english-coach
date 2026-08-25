@@ -26,6 +26,8 @@ export const DEFAULT_COACH = {
   level: 'B1-B2',
   situation: 'conversación de trabajo en inglés',
   profile: '',
+  sessionContext: '',
+  lang: 'en',
 };
 
 // Profile cap. Enough for a summarised real background without eating Groq's free
@@ -38,6 +40,16 @@ function profileBlock(settings) {
   const texto = (settings.profile || '').trim().slice(0, PROFILE_MAX_CHARS);
   if (!texto) return '';
   return `\n\nAbout the learner (their real background — use ONLY these facts, never invent experience):\n${texto}`;
+}
+
+// Per-meeting notes ("entrevista técnica de Angular: signals, RxJS…"). Same
+// token-budget rule as the profile: reply and report only, never the chips.
+export const CONTEXT_MAX_CHARS = 1500;
+
+export function contextBlock(settings) {
+  const texto = (settings.sessionContext || '').trim().slice(0, CONTEXT_MAX_CHARS);
+  if (!texto) return '';
+  return `\n\nToday's conversation context (topics and notes the learner wrote for this meeting — lean on them when answering knowledge questions):\n${texto}`;
 }
 
 class CoachError extends Error {}
@@ -161,7 +173,7 @@ export function parseJsonLoose(text) {
 // Groq's free tier allows 8000 tokens per minute across input and output. A report
 // carrying the whole transcript eats that and returns 429, so the oldest turns are
 // trimmed until it fits. Four characters per token is the usual rule of thumb.
-function turnsToText(turns, limit = 10, maxChars = Infinity) {
+export function turnsToText(turns, limit = 10, maxChars = Infinity) {
   const lines = turns
     .slice(-limit)
     .map((t) => `${t.speaker === 'me' ? 'LEARNER' : 'OTHER'}: ${t.text}`);
@@ -177,8 +189,20 @@ function turnsToText(turns, limit = 10, maxChars = Infinity) {
   return kept.join('\n');
 }
 
-// Leaves room for the system prompt and the 2500 output tokens within the free minute.
+// Leaves room for the system prompt and the 2800 output tokens within the free minute.
 const REPORT_MAX_CHARS = 12000;
+
+// Spanish-session override, appended to the live prompts: same structure and
+// fields, but the phrases to say are Spanish and a gloss is pointless for a
+// native speaker — there the coach is professional support, not language help.
+const SPANISH_MODE = `
+
+IMPORTANT OVERRIDE: this conversation is in SPANISH, the learner's NATIVE language. They need
+professional support (what to say, how to phrase it well in a work setting), not language help.
+Every "en" field must contain the SPANISH phrase to say, in professional spoken register.
+Return "es" as an empty string. "nudge" stays in Spanish.`;
+
+const langMode = (settings) => (settings.lang === 'es' ? SPANISH_MODE : '');
 
 // --- 1. Vocabulary chips after each of the other speaker's turns --------------
 
@@ -219,16 +243,9 @@ const HINT_SCHEMA = {
   additionalProperties: false,
 };
 
-export async function askHints({ turns, settings }) {
-  const raw = await ask({
-    provider: settings.liveProvider,
-    model: settings.liveModel,
-    keys: settings,
-    system: HINT_SYSTEM,
-    user: `Learner level: ${settings.level}. Context: ${settings.situation}.\n\nConversation so far:\n${turnsToText(turns, 8)}`,
-    maxTokens: 700,
-    schema: HINT_SCHEMA,
-  });
+// Shared by the live hints and the pre-conversation starter: both broadcast the
+// same HINTS shape. Pure so Node can test it.
+export function parseHints(raw) {
   const parsed = parseJsonLoose(raw);
   if (!parsed || !Array.isArray(parsed.words)) throw new CoachError('Respuesta de sugerencias no válida.');
   return {
@@ -238,29 +255,71 @@ export async function askHints({ turns, settings }) {
   };
 }
 
+export async function askHints({ turns, settings }) {
+  const raw = await ask({
+    provider: settings.liveProvider,
+    model: settings.liveModel,
+    keys: settings,
+    system: HINT_SYSTEM + langMode(settings),
+    user: `Learner level: ${settings.level}. Context: ${settings.situation}.\n\nConversation so far:\n${turnsToText(turns, 8)}`,
+    maxTokens: 700,
+    schema: HINT_SCHEMA,
+  });
+  return parseHints(raw);
+}
+
+// --- 1b. Starter kit before the first turn ------------------------------------
+
+const STARTER_SYSTEM = `You help a Spanish-speaking professional get ready for an English
+conversation that is about to start. From the situation and their notes, return:
+"words": 4 short items they will likely need in THIS topic — connectors, collocations or
+phrasal verbs that make them sound natural, 1 to 4 words each.
+"openers": 2 or 3 short natural ways to begin an answer in this situation, 2 to 6 words each,
+spoken register.
+"nudge": one very short tip (max 8 words, in Spanish) to sound natural here.
+Each words/openers item has "en" and "es" (Spanish gloss, max 5 words).
+Reply ONLY with JSON: {"words":[{"en":"...","es":"..."}],"openers":[{"en":"...","es":"..."}],"nudge":"..."}`;
+
+// One call per session (and per mid-session context edit), on the cheap live
+// model: it primes the chips before the other person has said anything.
+export async function askStarter({ settings }) {
+  const raw = await ask({
+    provider: settings.liveProvider,
+    model: settings.liveModel,
+    keys: settings,
+    system: STARTER_SYSTEM + langMode(settings),
+    user: `Learner level: ${settings.level}. Situation: ${settings.situation}.${contextBlock(settings)}`,
+    maxTokens: 700,
+    schema: HINT_SCHEMA,
+  });
+  return parseHints(raw);
+}
+
 // --- 2. Full reply on demand (keyboard shortcut) -----------------------------
 
 const REPLY_SYSTEM = `You are helping a Spanish-speaking professional answer in a live English
-conversation. Give them BUILDING BLOCKS, not one canned answer: they are mid-conversation and
-need to pick something fast and say it out loud.
+conversation. They will read your answer OUT LOUD while the other person waits, so it must be
+SPEAKABLE, not impressive.
 
-"openers": 3 or 4 short ways to BEGIN answering what was just asked — connectors, framing
-phrases, or natural ways to buy a second while they think. 2 to 8 words each, spoken register.
+"answer": EXACTLY ONE answer to the LAST question or point the other person raised — your single
+best option, never alternatives. Spoken register, at the learner's level. Sentences of 12 words
+or fewer; two short sentences beat one complex one. Everyday words the learner already knows; at
+most ONE technical term per sentence, and only when the topic truly needs it — wrap that term in
+**double asterisks** so the interface can highlight it. For a knowledge question (e.g. a
+technical interview) the answer must be CORRECT: use the conversation-context notes if provided
+plus your own knowledge, said simply. If the last turn was not a question, give the most natural
+next thing to say.
 
-"ideas": 3 or 4 different ways to say the SUBSTANCE of their answer. One sentence each, spoken
-register, at the learner's level. This is the part they get stuck on: they know what they mean
-in Spanish and cannot phrase it in English. Prefer concrete, specific wording — name the result,
-the metric, the mechanism — over vague phrasing. Offer genuinely different angles, not three
-rewordings of the same sentence.
+"ideas": exactly 2 richer ways to express the same answer — fuller sentences with the precise
+terminology, for the learner to STUDY after the conversation, not to read live.
 
-Every item needs "en" (exactly what to say) and "es" (a short Spanish gloss, max 6 words, so they
-can pick at a glance without reading the English first).
+Every item needs "en" (exactly what to say) and "es" (a short Spanish gloss, max 6 words).
 
-If a background section is provided, ground the ideas in those real facts — concrete projects,
-tools and results beat generic phrasing in an interview. Never invent employers, job titles,
-numbers or achievements that are not stated there: the learner has to say this out loud as the
-truth. If the background does not cover what was asked, stay honest and general rather than
-fabricating detail.`;
+If a background section is provided, ground personal answers in those real facts. Technical and
+conceptual knowledge is fair game: teach them the right answer. What you must never invent is
+their biography — employers, job titles, numbers or achievements not stated in the background:
+the learner has to say this out loud as the truth. If the background does not cover a personal
+question, stay honest and general rather than fabricating detail.`;
 
 const REPLY_ITEMS = {
   type: 'array',
@@ -274,8 +333,8 @@ const REPLY_ITEMS = {
 
 const REPLY_SCHEMA = {
   type: 'object',
-  properties: { openers: REPLY_ITEMS, ideas: REPLY_ITEMS },
-  required: ['openers', 'ideas'],
+  properties: { answer: REPLY_ITEMS, ideas: REPLY_ITEMS },
+  required: ['answer', 'ideas'],
   additionalProperties: false,
 };
 
@@ -284,36 +343,60 @@ const cleanItems = (list) => (Array.isArray(list) ? list : [])
   .map((i) => ({ en: i.en.trim().replace(/^["“]|["”]$/g, ''), es: (i.es || '').trim() }))
   .slice(0, 4);
 
-export async function askReply({ turns, settings }) {
-  const raw = await ask({
-    provider: settings.liveProvider,
-    model: settings.liveModel,
-    keys: settings,
-    system: REPLY_SYSTEM,
-    user: `Learner level: ${settings.level}. Context: ${settings.situation}.${profileBlock(settings)}`
-      + `\n\nConversation so far:\n${turnsToText(turns, 10)}`
-      + `\n\nGive the learner openers and ideas for what to say next.`,
-    maxTokens: 900,
-    schema: REPLY_SCHEMA,
-  });
+// Pure so Node can test it: the model's raw text in, the two groups out. One
+// answer only — in a live conversation the learner reads the first option
+// anyway, so alternatives are cost (screen, tokens, hesitation), not help.
+export function parseReply(raw) {
   const parsed = parseJsonLoose(raw);
   if (!parsed) throw new CoachError('Respuesta no válida del modelo.');
-  const openers = cleanItems(parsed.openers);
-  const ideas = cleanItems(parsed.ideas);
-  if (!openers.length && !ideas.length) throw new CoachError('El modelo no devolvió ninguna opción.');
-  return { openers, ideas };
+  const answer = cleanItems(parsed.answer).slice(0, 1);
+  const ideas = cleanItems(parsed.ideas).slice(0, 2);
+  if (!answer.length && !ideas.length) {
+    throw new CoachError('El modelo no devolvió ninguna opción.');
+  }
+  return { answer, ideas };
+}
+
+export async function askReply({ turns, settings }) {
+  // The report's (bigger) model, not the live one: the reply is on demand, so the
+  // extra latency is paid once, and knowledge questions need the stronger model.
+  const raw = await ask({
+    provider: settings.reportProvider,
+    model: settings.reportModel,
+    keys: settings,
+    system: REPLY_SYSTEM + langMode(settings),
+    user: `Learner level: ${settings.level}. Context: ${settings.situation}.`
+      + `${profileBlock(settings)}${contextBlock(settings)}`
+      // Capped by characters, not turns: soft cuts split one long question into
+      // many small segments, so a turn count could drop the question itself. The
+      // cap keeps it whole while bounding cost and latency.
+      + `\n\nConversation so far:\n${turnsToText(turns, 10, 1200)}`
+      + `\n\nAnswer the other person's last turn for the learner: one speakable answer, then two study ideas.`,
+    maxTokens: 450,
+    schema: REPLY_SCHEMA,
+  });
+  return parseReply(raw);
 }
 
 // --- 3. Closing report -------------------------------------------------------
 
 const REPORT_SYSTEM = `Eres un profesor de inglés que analiza una conversación real de un hispanohablante.
-"LEARNER" es tu alumno; "OTHER" es la otra persona. Analiza SOLO las intervenciones del alumno.
+"LEARNER" es tu alumno; "OTHER" es la otra persona. El «Resumen de la reunión» usa TODA la
+conversación; el resto de secciones analiza SOLO las intervenciones del alumno.
 La transcripción viene de reconocimiento automático: ignora errores obvios de puntuación o de
-transcripción fonética y no los reportes como errores del alumno.
+transcripción fonética y no los reportes como errores del alumno. Una frase con palabras
+inexistentes o jerga técnica deformada («request quid», «ray-tree after heater») es casi siempre
+el reconocedor destrozando un término técnico, no un error del alumno: trátala como ruido y no
+la lleves a la tabla de gramática.
 
 Responde en español, en Markdown, con exactamente estas secciones:
 
-## Resumen
+## Resumen de la reunión
+De qué se habló, en 3 o 4 viñetas concretas con lo importante. Termina con una línea
+**Pendientes:** y los compromisos o temas que quedaron abiertos (algo que revisar, enviar,
+decidir o agendar), tomados solo de la transcripción. Si no quedó nada pendiente, dilo en una línea.
+
+## Cómo lo hiciste
 Dos o tres frases sobre cómo se desempeñó, concretas, sin adular.
 
 ## Errores de gramática
@@ -322,6 +405,11 @@ Tabla con columnas | Dijiste | Correcto | Por qué |. Máximo 8 filas, las más 
 ## Traducciones literales del español
 Lista de calcos detectados y cómo lo diría un nativo. Si no hay, dilo en una línea.
 
+## Conectores y frases para aprender
+Los conectores que le faltaron para hilar sus respuestas y 4 o 5 frases hechas que le conviene
+memorizar para esta situación. Cada una con el inglés en negrita, una glosa corta en español y
+el momento real de la conversación donde encajaba.
+
 ## Vocabulario para subir de nivel
 5 expresiones que encajaban en esta conversación y no usó, cada una con un ejemplo tomado del contexto real.
 
@@ -329,7 +417,45 @@ Lista de calcos detectados y cómo lo diría un nativo. Si no hay, dilo en una l
 Muletillas, repeticiones, frases inacabadas. Menciónalo solo si hay evidencia en la transcripción.
 
 ## Nivel y plan
-Nivel CEFR aproximado con una frase de justificación y tres ejercicios concretos para esta semana.`;
+Nivel CEFR aproximado con una frase de justificación, tres ejercicios concretos para esta semana
+y un consejo profesional de coach: qué hacer distinto en la próxima conversación para que cada
+una mejore la anterior.`;
+
+// In a Spanish session the learner is a native speaker: grading their Spanish
+// grammar or CEFR level would be noise. The report becomes a communication
+// coach — clarity, fillers, better phrasings, professional formulas.
+const REPORT_SYSTEM_ES = `Eres un coach de comunicación profesional que analiza una conversación
+real EN ESPAÑOL de un profesional hispanohablante (por ejemplo, una entrevista técnica).
+"LEARNER" es tu cliente; "OTHER" es la otra persona. El «Resumen de la reunión» usa TODA la
+conversación; el resto de secciones analiza SOLO las intervenciones del cliente.
+La transcripción viene de reconocimiento automático: palabras inexistentes o jerga deformada
+son ruido del reconocedor, no errores del cliente — ignóralas.
+
+Responde en español, en Markdown, con exactamente estas secciones:
+
+## Resumen de la reunión
+De qué se habló, en 3 o 4 viñetas concretas con lo importante. Termina con una línea
+**Pendientes:** y los compromisos o temas que quedaron abiertos (algo que revisar, enviar,
+decidir o agendar), tomados solo de la transcripción. Si no quedó nada pendiente, dilo en una línea.
+
+## Cómo lo hiciste
+Dos o tres frases sobre claridad, estructura y seguridad al responder, concretas, sin adular.
+
+## Respuestas que se podían decir mejor
+Tabla con columnas | Dijiste | Mejor | Por qué |. Máximo 6 filas: claridad, precisión técnica o
+registro profesional — no corrijas gramática de nativo.
+
+## Muletillas y fluidez
+Muletillas, repeticiones, rodeos y frases inacabadas. Menciónalo solo si hay evidencia en la
+transcripción.
+
+## Fórmulas profesionales para aprender
+4 o 5 fórmulas que encajaban en esta conversación (para estructurar una respuesta, ganar unos
+segundos, cerrar un punto), cada una con el momento real donde encajaba.
+
+## Plan
+Tres ejercicios concretos para esta semana y un consejo profesional de coach: qué hacer distinto
+en la próxima conversación para que cada una mejore la anterior.`;
 
 export async function askReport({ turns, settings }) {
   const mine = turns.filter((t) => t.speaker === 'me').length;
@@ -340,9 +466,10 @@ export async function askReport({ turns, settings }) {
     provider: settings.reportProvider,
     model: settings.reportModel,
     keys: settings,
-    system: REPORT_SYSTEM,
-    user: `Nivel declarado: ${settings.level}. Contexto: ${settings.situation}.${profileBlock(settings)}\n\n`
+    system: settings.lang === 'es' ? REPORT_SYSTEM_ES : REPORT_SYSTEM,
+    user: `Nivel declarado: ${settings.level}. Contexto: ${settings.situation}.`
+      + `${profileBlock(settings)}${contextBlock(settings)}\n\n`
       + `Transcripción${recortada ? ' (sólo la parte final de la conversación)' : ' completa'}:\n${texto}`,
-    maxTokens: 2500,
+    maxTokens: 2800,
   });
 }

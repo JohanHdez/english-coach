@@ -26,7 +26,7 @@ overlay / sidepanel / setup ──► background ──► offscreen ──► w
 
 | Type | Payload | Effect |
 |---|---|---|
-| `START` | `settings?` | starts a session; fails for tab audio without an invocation |
+| `START` | `settings?`, `quiet?` | starts a session; fails for tab audio without an invocation. `quiet` (overlay) suppresses the failure notification and popup — the sender paints the error itself |
 | `STOP` | — | stops the session; triggers the auto report |
 | `SUGGEST_REPLY` | — | forwards to offscreen; answer arrives as a `REPLY` broadcast |
 | `REPORT` | — | forwards to offscreen; generates and opens the report |
@@ -40,7 +40,9 @@ overlay / sidepanel / setup ──► background ──► offscreen ──► w
 
 **background → offscreen** (`target: 'offscreen'`)
 
-`START` (`streamId`, `streamKind`, `settings`), `STOP`, `SUGGEST_REPLY`, `REPORT`, `STATE`.
+`START` (`streamId`, `streamKind`, `settings`), `STOP`, `SUGGEST_REPLY`, `REPORT`, `STATE`,
+`CONTEXT_CHANGED` (the stored `sessionContext` was edited; regenerates the starter chips while
+no real hints round has painted yet).
 
 **offscreen → ui** (`target: 'ui'`, broadcast, mirrored into the tab)
 
@@ -48,9 +50,9 @@ overlay / sidepanel / setup ──► background ──► offscreen ──► w
 |---|---|---|
 | `RUNNING` | `running` | overlay, sidepanel, and `background` to track session state |
 | `STATUS` | `text`, `kind` (`info`/`ok`/`error`/`loading`), `show?` to force the overlay open | overlay, sidepanel |
-| `SEGMENT` | `entry` (`speaker`, `text`, `t`, `dur`) | overlay, sidepanel |
+| `SEGMENT` | `entry` (`speaker`, `text`, `t`, `dur`); a repeated (`speaker`, `t`) is a turn extended by folding — UIs upsert, not append | overlay, sidepanel |
 | `HINTS` | `words[]`, `openers[]` (each `{en, es}`), `nudge` | overlay, sidepanel |
-| `REPLY` | `openers[]`, `ideas[]` (each `{en, es}`), or `pending`, or `error` | overlay, sidepanel |
+| `REPLY` | `answer[]` (one item; its key term wrapped in `**`), `ideas[]` (each `{en, es}`), or `pending`, or `error` | overlay, sidepanel |
 | `QUEUE` | `pending` | overlay, sidepanel |
 | `PARTIAL` | `text` (English, provisional) | overlay, sidepanel |
 | `LIVE_STATE` | `state`, `detail?` | overlay, sidepanel |

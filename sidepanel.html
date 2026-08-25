@@ -17,6 +17,14 @@
 
     <section class="controls">
       <label class="field">
+        <span>Idioma de la conversación</span>
+        <select id="lang">
+          <option value="en">Inglés — con coach y traducción</option>
+          <option value="es">Español — apoyo profesional</option>
+        </select>
+      </label>
+
+      <label class="field">
         <span>Audio del interlocutor</span>
         <select id="themSource">
           <option value="tab">Pestaña actual (Meet, Zoom web, YouTube…)</option>
@@ -35,6 +43,11 @@
         <span>Grabar también mi micrófono</span>
       </label>
 
+      <label class="field">
+        <span>Contexto de hoy <span class="hint">· opcional</span></span>
+        <textarea id="sessionContext" rows="2" placeholder="entrevista técnica de Angular: signals, RxJS…"></textarea>
+      </label>
+
       <button id="toggle" class="primary">● Empezar</button>
       <p id="status" class="status">Listo.</p>
     </section>
@@ -51,12 +64,12 @@
       </div>
       <div id="replyBox" class="reply" hidden>
         <p id="replyStatus" class="reply-status" hidden></p>
-        <div id="replyOpeners" class="reply-group" hidden>
-          <span class="reply-label">Para arrancar</span>
+        <div id="replyAnswer" class="reply-group" hidden>
+          <span class="reply-label">Di esto</span>
           <div class="reply-list"></div>
         </div>
         <div id="replyIdeas" class="reply-group" hidden>
-          <span class="reply-label">Para decir tu idea</span>
+          <span class="reply-label">Para estudiar después</span>
           <div class="reply-list"></div>
         </div>
       </div>

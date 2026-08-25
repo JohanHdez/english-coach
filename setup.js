@@ -1,6 +1,6 @@
 import { PROVIDERS, DEFAULT_COACH } from './coach.js';
 import { liveAvailability, installLive } from './live.js';
-import { resolveProvider, PROFILE_MAX_CHARS } from './coach.js';
+import { resolveProvider, PROFILE_MAX_CHARS, CONTEXT_MAX_CHARS } from './coach.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -88,14 +88,19 @@ for (const id of ['groqKey', 'anthropicKey', 'liveModel', 'reportModel']) {
   $(id).addEventListener('change', checkKeys);
 }
 
-function countProfile() {
-  const usado = $('profile').value.trim().length;
-  const el = $('profileCount');
-  el.textContent = usado ? `· ${Math.min(usado, PROFILE_MAX_CHARS)}/${PROFILE_MAX_CHARS}` : '· opcional';
-  el.className = usado > PROFILE_MAX_CHARS ? 'hint err' : 'hint';
+function wireCounter(campo, contador, max) {
+  const update = () => {
+    const usado = $(campo).value.trim().length;
+    const el = $(contador);
+    el.textContent = usado ? `· ${Math.min(usado, max)}/${max}` : '· opcional';
+    el.className = usado > max ? 'hint err' : 'hint';
+  };
+  $(campo).addEventListener('input', update);
+  return update;
 }
 
-$('profile').addEventListener('input', countProfile);
+const countProfile = wireCounter('profile', 'profileCount', PROFILE_MAX_CHARS);
+const countContext = wireCounter('sessionContext', 'contextCount', CONTEXT_MAX_CHARS);
 
 async function checkLive() {
   const el = $('liveStatus');
@@ -206,6 +211,7 @@ $('save').addEventListener('click', async () => {
     level: $('level').value,
     situation: $('situation').value.trim() || DEFAULT_COACH.situation,
     profile: $('profile').value.trim().slice(0, PROFILE_MAX_CHARS),
+    sessionContext: $('sessionContext').value.trim().slice(0, CONTEXT_MAX_CHARS),
   };
   await chrome.storage.local.set({ settings: next, setupDone: true });
   $('saved').textContent = ' Guardado ✓';
@@ -231,7 +237,9 @@ $('save').addEventListener('click', async () => {
   $('level').value = s.level;
   $('situation').value = s.situation;
   $('profile').value = s.profile || '';
+  $('sessionContext').value = s.sessionContext || '';
   countProfile();
+  countContext();
   fillModelSelect($('liveModel'), `${s.liveProvider}:${s.liveModel}`);
   fillModelSelect($('reportModel'), `${s.reportProvider}:${s.reportModel}`);
   await checkMic();
