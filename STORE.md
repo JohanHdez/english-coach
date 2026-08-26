@@ -50,18 +50,30 @@ GRATIS DE PRINCIPIO A FIN
 
 Sin cuenta, sin suscripción y sin límite de minutos. El coach es opcional y funciona con una API key gratuita que creas en menos de un minuto, sin tarjeta.
 
+CÓMO PRACTICAR SIN REUNIONES
+
+¿No tienes con quién hablar? Abre en una pestaña cualquier IA de voz que converse contigo —por ejemplo Sesame (app.sesame.com), gratis y sin instalación— y practica:
+
+1. Abre la conversación en una pestaña normal de Chrome.
+2. Pulsa el icono de la extensión (o Cmd/Ctrl+Shift+S): empieza a grabar y el coach aparece dentro de la página.
+3. Habla. Verás la transcripción de ambos, la traducción, y podrás pedir una respuesta sugerida cuando te trabes.
+4. Al terminar, pulsa Detener: el informe te dice qué corregir y qué estudiar para la próxima.
+
+El mismo flujo sirve para YouTube (escucha), Google Meet, Zoom web, Teams o una entrevista real. English Coach no está afiliado a Sesame: es solo un buen sitio para practicar.
+
 QUÉ HACE
 
-• Transcripción de dos hablantes: tus intervenciones y las suyas, separadas y con hora
-• Traducción al español bajo cada turno del interlocutor, en tu dispositivo
+• Transcripción de dos hablantes: tus intervenciones y las suyas, separadas y agrupadas por idea
+• Traducción al español bajo cada turno del interlocutor, hecha en tu dispositivo
 • Transcripción en vivo que muestra lo que se está diciendo mientras se dice
-• Chips de vocabulario tras cada turno: expresiones que probablemente vas a necesitar ahora
-• Respuestas sugeridas en dos bloques: frases para arrancar, y frases completas con tu idea, apoyadas en un perfil que escribes tú
-• Informe final: errores de gramática con la corrección y el porqué, calcos del español, expresiones que encajaban y no usaste, muletillas y un nivel CEFR aproximado con ejercicios
+• Chips de vocabulario tras cada turno, y un kit de arranque con expresiones del tema del día antes de que nadie hable
+• Respuesta sugerida hecha para decirse en voz alta: una sola frase clara con el término clave resaltado, y dos versiones más ricas para estudiar después. Se apoya en tu perfil y en las notas que escribas sobre la conversación de hoy — ideal para entrevistas técnicas
+• Informe final: resumen de la reunión con lo que quedó pendiente, errores de gramática con la corrección y el porqué, calcos del español, conectores y frases para memorizar, muletillas y un nivel CEFR aproximado con ejercicios para la semana
+• Modo español: la misma asistencia —transcripción, respuesta sugerida e informe de coach de comunicación— para tus entrevistas y reuniones en tu propio idioma
 
 PARA QUIÉN ES
 
-Para hispanohablantes que ya se defienden en inglés pero se traban en conversaciones reales: entrevistas, reuniones de trabajo, llamadas con clientes. La interfaz está en español a propósito, porque las pistas y el informe se leen mejor en tu idioma.
+Para hispanohablantes que ya se defienden en inglés pero se traban en conversaciones reales: entrevistas, reuniones de trabajo, llamadas con clientes. La interfaz está en español a propósito, porque las pistas y el informe se leen mejor en tu idioma. Y cuando la conversación importante es en español —una entrevista técnica, por ejemplo—, el modo español te acompaña igual.
 
 Código abierto bajo GPL-3.0: github.com/JohanHdez/english-coach
 ```

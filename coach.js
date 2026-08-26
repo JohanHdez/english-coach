@@ -99,7 +99,13 @@ async function callGroq({ key, model, system, user, maxTokens, schema, base }) {
   if (res.status === 429) {
     throw new CoachError('Groq: límite del plan gratuito alcanzado (8000 tokens por minuto). Espera un minuto y vuelve a intentarlo.');
   }
-  if (!res.ok) throw new CoachError(`Groq ${res.status}: ${redact(await res.text()).slice(0, 180)}`);
+  if (!res.ok) {
+    const cuerpo = redact(await res.text());
+    if (/json_validate_failed/.test(cuerpo)) {
+      throw new CoachError('Groq cortó la respuesta a medias (JSON inválido). Vuelve a intentarlo una vez.');
+    }
+    throw new CoachError(`Groq ${res.status}: ${cuerpo.slice(0, 180)}`);
+  }
   const data = await res.json();
   return data.choices?.[0]?.message?.content || '';
 }
@@ -372,7 +378,10 @@ export async function askReply({ turns, settings }) {
       // cap keeps it whole while bounding cost and latency.
       + `\n\nConversation so far:\n${turnsToText(turns, 10, 1200)}`
       + `\n\nAnswer the other person's last turn for the learner: one speakable answer, then two study ideas.`,
-    maxTokens: 450,
+    // The JSON itself is ~200 tokens, but gpt-oss models spend reasoning tokens
+    // from the same budget BEFORE writing it: a tight cap truncates the JSON and
+    // Groq rejects the call with 400 json_validate_failed.
+    maxTokens: 1200,
     schema: REPLY_SCHEMA,
   });
   return parseReply(raw);

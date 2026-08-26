@@ -16,12 +16,19 @@ language. The codebase and its documentation are in English.
   without a key.
 - Optional: an API engine (Groq) if you want maximum accuracy, and paid Claude for finer reports.
 
+**📦 [Install it from the Chrome Web Store](https://chromewebstore.google.com/detail/english-coach-%E2%80%94-transcrip/oghhgmcnchilddbnigfnklehimieimhm)** — one click, and updates arrive by themselves.
+
 ## Install
 
-> Not on the Chrome Web Store yet. It installs in developer mode: about a minute, no account, and
-> nothing to compile.
+**From the Chrome Web Store (recommended).**
+[Install it here](https://chromewebstore.google.com/detail/english-coach-%E2%80%94-transcrip/oghhgmcnchilddbnigfnklehimieimhm):
+one click, no developer mode, automatic updates. The settings page opens on install — grant the
+microphone permission, paste a free Groq API key if you want the coach (steps 5–7 below), and
+pin the extension to the toolbar (puzzle icon → pin).
 
-1. **[Download the latest version (.zip)](https://github.com/JohanHdez/english-coach/archive/refs/tags/v1.17.0.zip)**
+**In developer mode** — for trying changes before they reach the Store, or hacking on the code:
+
+1. **[Download the latest version (.zip)](https://github.com/JohanHdez/english-coach/archive/refs/tags/v1.17.1.zip)**
    and unzip it wherever you want to keep it — Desktop or Documents is fine. **Do not delete the
    folder afterwards**: Chrome loads the extension from there every time it starts.
 2. Open `chrome://extensions`.
@@ -35,9 +42,11 @@ language. The codebase and its documentation are in English.
 7. Click **Save settings**.
 8. Pin the extension to the toolbar (puzzle icon → pin).
 
-To update later, download the new zip, and in `chrome://extensions` remove the old card before
-loading the new folder. Unpacked extension IDs depend on the folder path, so leaving both loaded
-gives you two copies of the extension running at once.
+To update an unpacked copy later, download the new zip, and in `chrome://extensions` remove the
+old card before loading the new folder. Unpacked extension IDs depend on the folder path, so
+leaving both loaded gives you two copies of the extension running at once — and note that the
+Store copy and an unpacked copy are also two different extensions to Chrome: keep one, or both
+will inject their interface into the same page.
 
 ## Use
 
@@ -295,6 +304,12 @@ block instead of stacking.
 
 **`chrome://` pages, the Web Store and the extension's own pages cannot be captured.** That is a
 browser-level block.
+
+**«Groq 400: Failed to validate JSON … json_validate_failed» when asking for a reply.** Fixed in
+v1.17.1. The gpt-oss models spend reasoning tokens from the same output budget before writing
+the JSON; v1.16.0 capped that budget too low and the JSON came out truncated. Each failed
+attempt still consumed tokens, so re-clicking could also trip the free tier's 8000
+tokens-per-minute limit — that 429 was a consequence, not a separate problem.
 
 **«Error transcribiendo: Can't create a session … Missing required scale … DequantizeLinear».**
 A regression in ONNX Runtime 1.25+ (the engine bundled in `vendor/`) rejects every old q8
