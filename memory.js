@@ -39,3 +39,65 @@ export function reconcile(memory, turns) {
   if (memory.coveredUntil > newest) return emptyMemory(memory.sessionId);
   return memory;
 }
+
+export const linesOf = (turns) =>
+  turns.map((t) => `${t.speaker === 'me' ? 'LEARNER' : 'OTHER'}: ${t.text}`).join('\n');
+
+const byTime = (turns) => [...turns].sort((a, b) => a.t - b.t);
+const endOf = (t) => t.t + (t.dur || 0) * 1000;
+
+// The VAD cuts audio on silence; this cuts text the same way. Inside the band
+// around the target size, the chunk ends at the largest pause between turns, so
+// an idea is far less likely to be split across two distillation rounds.
+export function selectChunk(turns, memory, chunkChars, { all = false } = {}) {
+  const sorted = byTime(turns);
+  if (!sorted.length) return null;
+
+  // foldIntoTranscript can only ever extend the turn with the highest `t`.
+  // Distilling it would lose whatever is appended to it afterwards — silently.
+  // The exception is the final flush: by then the segmenters are flushed and the
+  // queue is drained, so nothing can grow and the last turn must be included.
+  const newest = sorted[sorted.length - 1].t;
+  const covered = memory?.coveredUntil || 0;
+  const pending = sorted.filter((t) => t.t > covered && (all || t.t < newest));
+  if (!pending.length) return null;
+
+  const size = (t) => t.text.length + 1;
+  const total = pending.reduce((n, t) => n + size(t), 0);
+  if (!all && total < chunkChars) return null;
+
+  if (all) {
+    const overlapAll = linesOf(sorted.filter((t) => t.t <= covered)).slice(-OVERLAP_CHARS);
+    const textAll = linesOf(pending);
+    return {
+      turns: pending, text: textAll,
+      overlapTurns: sorted.filter((t) => t.t <= covered), overlap: overlapAll,
+      endsAt: pending[pending.length - 1].t, chars: textAll.length,
+    };
+  }
+
+  const lo = chunkChars * CHUNK_BAND[0];
+  const hi = Math.min(chunkChars * CHUNK_BAND[1], chunkChars * CHUNK_MAX_FACTOR);
+
+  let acc = 0;
+  let cut = -1;
+  let bestGap = -1;
+  for (let i = 0; i < pending.length; i++) {
+    acc += size(pending[i]);
+    if (acc < lo) continue;
+    const next = pending[i + 1];
+    const gap = next ? Math.max(0, next.t - endOf(pending[i])) : 0;
+    const bonus = next && next.speaker !== pending[i].speaker ? 1 : 0;
+    if (cut === -1 || gap + bonus > bestGap) { bestGap = gap + bonus; cut = i; }
+    if (acc >= hi) break;
+  }
+  // A single turn longer than the ceiling: taken whole. Turns are atomic because
+  // splitting one would break the LEARNER-line attribution guard.
+  if (cut === -1) cut = 0;
+
+  const chunk = pending.slice(0, cut + 1);
+  const overlapTurns = sorted.filter((t) => t.t <= covered);
+  const overlap = linesOf(overlapTurns).slice(-OVERLAP_CHARS);
+  const text = linesOf(chunk);
+  return { turns: chunk, text, overlapTurns, overlap, endsAt: chunk[chunk.length - 1].t, chars: text.length };
+}
