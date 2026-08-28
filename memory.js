@@ -166,3 +166,28 @@ export function mergeTopics(existing, incoming, cap) {
   }
   return out.slice(-cap);
 }
+
+// A rolling estimate of what the current minute has already cost, so a background
+// round never spends the budget a user-requested reply is about to need. The
+// figures are nominal: the margin is the mechanism, not the arithmetic.
+export class Ledger {
+  constructor(now = () => Date.now()) {
+    this.now = now;
+    this.events = [];
+  }
+
+  spend(kind) {
+    this.events.push({ at: this.now(), tokens: NOMINAL_COST[kind] || 0 });
+  }
+
+  spent() {
+    const from = this.now() - BUDGET_WINDOW_MS;
+    this.events = this.events.filter((e) => e.at >= from);
+    return this.events.reduce((n, e) => n + e.tokens, 0);
+  }
+
+  room(tpm, kind) {
+    if (!tpm) return true;
+    return this.spent() + (NOMINAL_COST[kind] || 0) <= tpm * BUDGET_SAFETY;
+  }
+}

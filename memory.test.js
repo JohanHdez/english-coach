@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { sizing, emptyMemory, reconcile, selectChunk, linesOf } from './memory.js';
 import { normalizeText, acceptItems, acceptErrors, mergeTopics } from './memory.js';
+import { Ledger } from './memory.js';
 
 const turn = (speaker, text, t, dur = 1) => ({ speaker, text, t, dur });
 const filler = (n) => 'word '.repeat(n).trim();
@@ -188,4 +189,28 @@ test('mergeTopics caps and drops the oldest', () => {
   assert.equal(out.length, 60);
   assert.equal(out[out.length - 1].t, 999);
   assert.ok(!out.some((x) => x.t === 0));
+});
+
+test('the ledger only counts the last minute', () => {
+  let clock = 0;
+  const ledger = new Ledger(() => clock);
+  ledger.spend('hints');           // 1400
+  clock = 30000;
+  ledger.spend('hints');           // 1400
+  assert.equal(ledger.spent(), 2800);
+  clock = 61000;                   // the first one has aged out
+  assert.equal(ledger.spent(), 1400);
+});
+
+test('the ledger refuses a round that would breach the safety margin', () => {
+  let clock = 0;
+  const ledger = new Ledger(() => clock);
+  for (let i = 0; i < 4; i++) ledger.spend('hints');   // 5600 of 8000
+  assert.equal(ledger.room(8000, 'distill'), false);   // 5600 + 1300 > 8000 * 0.75
+});
+
+test('the ledger always has room on an unmetered provider', () => {
+  const ledger = new Ledger(() => 0);
+  for (let i = 0; i < 20; i++) ledger.spend('report');
+  assert.equal(ledger.room(null, 'distill'), true);
 });
