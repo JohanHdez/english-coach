@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { sizing, emptyMemory, reconcile, selectChunk, linesOf } from './memory.js';
+import { normalizeText, acceptItems, acceptErrors, mergeTopics } from './memory.js';
 
 const turn = (speaker, text, t, dur = 1) => ({ speaker, text, t, dur });
 const filler = (n) => 'word '.repeat(n).trim();
@@ -117,4 +118,74 @@ test('selectChunk carries the tail of what was already distilled as overlap', ()
   const chunk = selectChunk(turns, { coveredUntil: 1000 }, 1800);
   assert.ok(chunk.overlap.includes('retry policy'));
   assert.ok(!chunk.text.includes('retry policy'));
+});
+
+test('normalizeText folds case, punctuation and whitespace', () => {
+  assert.equal(normalizeText('  It DEPENDS, of the API!  '), 'it depends of the api');
+});
+
+test('normalizeText folds accents, so the Spanish stopword list can be plain', () => {
+  assert.equal(normalizeText('¿Y qué pasa con el despliegue?'), 'y que pasa con el despliegue');
+});
+
+test('acceptItems keeps only items whose quote is verbatim in the chunk', () => {
+  const chunk = [turn('them', 'We agreed to ship the retry policy on Friday', 100)];
+  const out = acceptItems([
+    { text: 'Retry policy ships Friday', quote: 'ship the retry policy on Friday' },
+    { text: 'They approved the budget', quote: 'the budget was approved yesterday' },
+  ], chunk);
+  assert.equal(out.length, 1);
+  assert.equal(out[0].text, 'Retry policy ships Friday');
+  assert.equal(out[0].t, 100);
+});
+
+test('acceptItems rejects a quote too short to prove anything', () => {
+  const chunk = [turn('them', 'We agreed to ship it', 100)];
+  assert.deepEqual(acceptItems([{ text: 'x', quote: 'ship' }], chunk), []);
+});
+
+test('acceptErrors anchors the wrong pair to a LEARNER line and derives said/t', () => {
+  const chunk = [
+    turn('them', 'It depends of the load, right?', 100),
+    turn('me', 'Yes, it depends of the load in production', 200),
+  ];
+  const out = acceptErrors([{ wrong: 'depends of', right: 'depends on', kind: 'grammar' }], chunk);
+  assert.equal(out.length, 1);
+  assert.equal(out[0].said, 'Yes, it depends of the load in production');
+  assert.equal(out[0].t, 200);
+});
+
+test('acceptErrors refuses to attribute the other speaker words to the learner', () => {
+  const chunk = [turn('them', 'It depends of the load', 100), turn('me', 'Sure', 200)];
+  assert.deepEqual(acceptErrors([{ wrong: 'depends of', right: 'depends on' }], chunk), []);
+});
+
+test('acceptErrors drops a correction that changes nothing', () => {
+  const chunk = [turn('me', 'I have five years working here', 100)];
+  assert.deepEqual(acceptErrors([{ wrong: 'five years', right: 'Five  years.' }], chunk), []);
+});
+
+test('acceptErrors drops a whole paragraph posing as a minimal pair', () => {
+  const long = 'a'.repeat(80);
+  const chunk = [turn('me', long, 100)];
+  assert.deepEqual(acceptErrors([{ wrong: long, right: 'something else' }], chunk), []);
+});
+
+test('acceptErrors defaults an unknown kind to grammar', () => {
+  const chunk = [turn('me', 'I am agree with that', 100)];
+  assert.equal(acceptErrors([{ wrong: 'I am agree', right: 'I agree', kind: 'nonsense' }], chunk)[0].kind, 'grammar');
+});
+
+test('mergeTopics folds a topic split across two rounds', () => {
+  const existing = [{ text: 'The retry policy for the payment gateway', quote: 'q1', t: 1 }];
+  const out = mergeTopics(existing, [{ text: 'The retry policy for the payment gateway was discussed', quote: 'q2', t: 2 }], 60);
+  assert.equal(out.length, 1);
+});
+
+test('mergeTopics caps and drops the oldest', () => {
+  const existing = Array.from({ length: 60 }, (_, i) => ({ text: `topic ${i}`, quote: 'q', t: i }));
+  const out = mergeTopics(existing, [{ text: 'brand new topic here', quote: 'q', t: 999 }], 60);
+  assert.equal(out.length, 60);
+  assert.equal(out[out.length - 1].t, 999);
+  assert.ok(!out.some((x) => x.t === 0));
 });

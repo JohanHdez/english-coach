@@ -101,3 +101,68 @@ export function selectChunk(turns, memory, chunkChars, { all = false } = {}) {
   const text = linesOf(chunk);
   return { turns: chunk, text, overlapTurns, overlap, endsAt: chunk[chunk.length - 1].t, chars: text.length };
 }
+
+const KINDS = new Set(['grammar', 'calque', 'register']);
+
+// Accents are folded too. It makes the Spanish stopword list plain ASCII, and it
+// makes anchoring survive a recogniser that drops a tilde — which it does.
+export const normalizeText = (s) => String(s ?? '')
+  .toLowerCase()
+  .normalize('NFD')
+  .replace(/\p{M}/gu, '')
+  .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+  .replace(/\s+/g, ' ')
+  .trim();
+
+// A topic is a summary, so the summary is free and its evidence is not: the quote
+// has to appear verbatim in the fragment or the item is dropped without comment.
+export function acceptItems(raw, anchorTurns) {
+  const out = [];
+  for (const item of Array.isArray(raw) ? raw : []) {
+    const text = String(item?.text ?? '').trim();
+    const quote = String(item?.quote ?? '').trim();
+    if (!text || quote.length < MIN_QUOTE_CHARS) continue;
+    const needle = normalizeText(quote);
+    if (!needle) continue;
+    const turn = anchorTurns.find((t) => normalizeText(t.text).includes(needle));
+    if (!turn) continue;
+    out.push({ text, quote, t: turn.t });
+  }
+  return out;
+}
+
+// One lookup enforces two guards at once: the wrong pair must exist verbatim, and
+// it must exist in a LEARNER line — a mistake quoted from the other speaker is a
+// misattribution by definition.
+export function acceptErrors(raw, chunkTurns) {
+  const learner = chunkTurns.filter((t) => t.speaker === 'me');
+  const out = [];
+  for (const e of Array.isArray(raw) ? raw : []) {
+    const wrong = String(e?.wrong ?? '').trim();
+    const right = String(e?.right ?? '').trim();
+    if (!wrong || !right || wrong.length > WRONG_MAX_CHARS) continue;
+    const needle = normalizeText(wrong);
+    if (!needle || needle === normalizeText(right)) continue;
+    const turn = learner.find((t) => normalizeText(t.text).includes(needle));
+    if (!turn) continue;
+    out.push({ wrong, right, kind: KINDS.has(e?.kind) ? e.kind : 'grammar', said: turn.text, t: turn.t });
+  }
+  return out;
+}
+
+// Cutting on a pause is not perfect: an idea can still straddle two rounds and
+// arrive as two near-identical topics. Folding them is plain string work, not a
+// second model call.
+const topicKey = (t) => normalizeText(t.text).slice(0, 40);
+
+export function mergeTopics(existing, incoming, cap) {
+  const out = [...existing];
+  const seen = new Set(out.map(topicKey));
+  for (const item of incoming) {
+    const key = topicKey(item);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(item);
+  }
+  return out.slice(-cap);
+}
