@@ -28,7 +28,7 @@ pin the extension to the toolbar (puzzle icon → pin).
 
 **In developer mode** — for trying changes before they reach the Store, or hacking on the code:
 
-1. **[Download the latest version (.zip)](https://github.com/JohanHdez/english-coach/archive/refs/tags/v1.17.1.zip)**
+1. **[Download the latest version (.zip)](https://github.com/JohanHdez/english-coach/archive/refs/tags/v1.18.0.zip)**
    and unzip it wherever you want to keep it — Desktop or Documents is fine. **Do not delete the
    folder afterwards**: Chrome loads the extension from there every time it starts.
 2. Open `chrome://extensions`.
@@ -238,7 +238,7 @@ the API engine, and text only leaves if you enable the coach.
 | Processing | GPU (WebGPU) is much faster; CPU is the compatible mode |
 | Engine | Local Whisper (free, private) or the Groq API (`whisper-large-v3-turbo`, needs a key) |
 | Short utterances | Discards noise and lone filler sounds («hmm», «uh», «ah») instead of transcribing them |
-| Live transcription | Shows what is being said as it happens using Chrome's on-device recognition (139+); Whisper replaces it when the phrase closes |
+| Live transcription | Shows what is being said as it happens: Chrome's on-device recognition (139+) word by word where available, otherwise a provisional Whisper pass over the phrase still being spoken (~1 s blocks, local engine only). The authoritative turn replaces it when the phrase closes |
 | Translate to Spanish | A Spanish line under each of the other speaker's turns, using Chrome's built-in translator (138+). Free, no key, and the text never leaves the machine |
 | Live coach | Vocabulary chips after each of the other speaker's turns + `⌘⇧E` for a full reply |
 | Report | Automatic on stop, or on demand with «Informe de la sesión» |
@@ -270,7 +270,7 @@ mic ──getUserMedia───┘                              │
 
 Files: `background.js` (coordination, shortcut, message relay and storage), `offscreen.js`
 (capture, queue and coach: the heart of it, alive even with no interface open), `capture.js`
-(opening the stream by id type), `segmenter.js` (VAD and WAV), `worker.js` (local Whisper),
+(opening the stream by id type), `segmenter.js` (VAD, WAV and the provisional preview lane), `worker.js` (local Whisper),
 `live.js` (provisional transcription via on-device Web Speech), `translate.js` (Chrome's built-in
 translator), `coach.js` (Groq and Anthropic adapters + prompts), `overlay.js` (in-page
 interface), `sidepanel.*` (full view), `report.*` (report), `setup.*` (permissions and settings),
@@ -301,6 +301,16 @@ Since v1.15.1 consecutive segments of the same speaker close in time fold back i
 screen and in the transcript, and the translation is redone over the merged thought. The
 segments still arrive one by one — that is the streaming working — they just extend the same
 block instead of stacking.
+
+**The English of what the other person says only shows up several seconds after they said it.**
+Fixed in v1.18.0. The live line came only from Chrome's on-device speech recognition, and when
+its language pack was missing — or macOS blocked it — that layer switched off silently: nothing
+appeared until Whisper closed the phrase, 4–6 s later. A second provisional lane now transcribes
+the phrase *while it is still open*, about once a second, so the English shows in ~1.5–2 s, in
+blocks rather than word by word. It runs only on the local engine, only while the transcription
+queue is idle, and retires itself if a pass costs more than it saves — it can never delay a real
+turn. The panel and the overlay now say which of the two layers is running, and offer to install
+the language pack right there when that is what is missing.
 
 **`chrome://` pages, the Web Store and the extension's own pages cannot be captured.** That is a
 browser-level block.
@@ -366,3 +376,7 @@ reload.
 - Chrome's internal pages (`chrome://`, Web Store) cannot be captured.
 - With `small.en` on CPU, transcription is slower than speech; use GPU or a smaller model if
   real time matters.
+- On machines that fall back to CPU the provisional Whisper lane switches itself off after two
+  slow passes: without a GPU one pass costs more than the second it would save, and the live line
+  is not worth delaying a real turn for. Installing Chrome's language pack restores the
+  word-by-word layer, which is cheap on any machine.

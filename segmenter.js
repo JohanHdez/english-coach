@@ -10,6 +10,11 @@ export const MAX_SEG_MS = 18000; // forced cut
 // monologues stream out as readable 4-6 s pieces instead.
 export const SOFT_CUT_MS = 3500;
 export const SOFT_SILENCE_MS = 300;
+// The provisional lane: while a phrase is still open, a copy of the audio so far
+// is offered for a throwaway transcription, so the English shows up in about a
+// second instead of waiting for the phrase to close. Nothing here is stored.
+export const PREVIEW_EVERY_MS = 1200;
+export const PREVIEW_MIN_MS = 1200;
 export const MIN_SEG_MS = 900;   // discards noise and lone filler sounds
 export const MIN_VOICED = 5;     // minimum voiced blocks (0.5 s of real speech)
 export const PREROLL = 3;        // preceding blocks kept as preroll
@@ -21,6 +26,10 @@ export class Segmenter {
     this.now = now;
     this.minSegMs = opts.minSegMs ?? MIN_SEG_MS;
     this.minVoiced = opts.minVoiced ?? MIN_VOICED;
+    this.onPreview = opts.onPreview || null;
+    this.previewEveryMs = opts.previewEveryMs ?? PREVIEW_EVERY_MS;
+    this.previewMinMs = opts.previewMinMs ?? PREVIEW_MIN_MS;
+    this.lastPreviewAt = null;
     this.floor = null;
     this.pre = [];
     this.chunks = [];
@@ -63,6 +72,31 @@ export class Segmenter {
     const softCut = durationMs >= SOFT_CUT_MS && this.silence >= SOFT_SILENCE_MS;
     if (this.silence >= SILENCE_MS) this.flush();
     else if (softCut || durationMs >= MAX_SEG_MS) this.flush(true);
+    // Only when nothing closed the phrase: on a cut the authoritative segment is
+    // already on its way, and a provisional copy of the same audio would just
+    // flicker on screen before being replaced.
+    else this.preview(durationMs);
+  }
+
+  // A throwaway snapshot of the phrase in progress. It is a copy, not the live
+  // chunks: the transcription path transfers the buffer it receives, and the real
+  // segment still needs every sample.
+  preview(durationMs) {
+    if (!this.onPreview) return;
+    // Never on a silent block: the audio it would carry is about to be delivered
+    // by the real segment, and a phrase too short to preview would sneak one in
+    // as its closing silence pushed the duration past the floor.
+    if (this.silence > 0) return;
+    if (durationMs < this.previewMinMs || this.voicedCount < this.minVoiced) return;
+    const at = this.now();
+    if (this.lastPreviewAt !== null && at - this.lastPreviewAt < this.previewEveryMs) return;
+    this.lastPreviewAt = at;
+    this.onPreview({
+      speaker: this.speaker,
+      audio: concat(this.chunks),
+      startedAt: this.startedAt,
+      durationMs,
+    });
   }
 
   // keepActive: a mid-utterance emission (soft or hard cut). The segmenter stays
@@ -78,6 +112,9 @@ export class Segmenter {
     const voiced = this.voicedCount;
     this.chunks = [];
     this.voicedCount = 0;
+    // Each piece previews on its own: the next one starts from nothing and is due
+    // as soon as it is long enough, not previewEveryMs after the previous cut.
+    this.lastPreviewAt = null;
     if (keepActive) {
       // The next piece starts at the cut; the silence counter keeps running so
       // a dip that turns into a real pause still closes (the near-empty stub is
@@ -91,12 +128,16 @@ export class Segmenter {
 
     if (durationMs < this.minSegMs || voiced < this.minVoiced) return;
 
-    const total = chunks.reduce((n, c) => n + c.length, 0);
-    const audio = new Float32Array(total);
-    let off = 0;
-    for (const c of chunks) { audio.set(c, off); off += c.length; }
-    this.onSegment({ speaker: this.speaker, audio, startedAt, durationMs });
+    this.onSegment({ speaker: this.speaker, audio: concat(chunks), startedAt, durationMs });
   }
+}
+
+function concat(chunks) {
+  const total = chunks.reduce((n, c) => n + c.length, 0);
+  const out = new Float32Array(total);
+  let off = 0;
+  for (const c of chunks) { out.set(c, off); off += c.length; }
+  return out;
 }
 
 // Converts mono Float32 to 16-bit PCM WAV (for the Groq API).

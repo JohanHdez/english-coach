@@ -91,6 +91,11 @@ button.danger { color: var(--danger); }
 .status { margin: 0; font-size: 11.5px; color: var(--muted); min-height: 16px; }
 .status.error { color: var(--danger); }
 .status.ok { color: #2f9e44; }
+.live-note { margin: 4px 0 0; font-size: 11px; line-height: 1.35; color: #b8860b; }
+.live-note .linky {
+  background: none; border: none; padding: 0; margin-left: 4px; font: inherit;
+  color: var(--accent, #2f6fed); text-decoration: underline; cursor: pointer;
+}
 
 .coach {
   padding: 9px 12px; border-bottom: 1px solid var(--border);

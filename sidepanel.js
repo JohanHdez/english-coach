@@ -1,5 +1,6 @@
 import { DEFAULT_COACH, CONTEXT_MAX_CHARS } from './coach.js';
 import { toSpanish } from './translate.js';
+import { installLive } from './live.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -14,6 +15,7 @@ const els = {
   report: $('report'), analyze: $('analyze'), download: $('download'), clear: $('clear'),
   openWindow: $('openWindow'),
   partial: $('partial'), partialEn: $('partialEn'), partialEs: $('partialEs'),
+  liveNote: $('liveNote'), liveNoteText: $('liveNoteText'), liveNoteAction: $('liveNoteAction'),
 };
 
 let running = false;
@@ -111,6 +113,45 @@ function showHints({ words = [], nudge = '', openers = [] }) {
   }
   els.nudge.textContent = nudge || '';
 }
+
+// What the learner loses when Chrome's on-device recognition is missing depends
+// on whether the Whisper preview lane can stand in: with it there is still live
+// English, in ~1 s pieces instead of word by word. Saying "sin transcripción en
+// vivo" while text is in fact appearing would just read as a broken extension.
+function liveNotice({ state: st, detail, fallback }) {
+  if (!st || st === 'available' || st === 'unknown') return '';
+  if (st === 'downloading') return 'Descargando el paquete de idioma…';
+  const porque = {
+    unsupported: 'este Chrome no lo expone donde graba la extensión',
+    unavailable: 'el reconocimiento local no está disponible aquí',
+    downloadable: 'falta el paquete de idioma',
+    slow: 'este equipo transcribe demasiado despacio',
+    error: detail ? `falló el reconocimiento local (${detail})` : 'falló el reconocimiento local',
+  }[st] || 'el reconocimiento local no está disponible aquí';
+  return fallback
+    ? `En vivo con Whisper, no palabra por palabra: ${porque}.`
+    : `Sin transcripción en vivo: ${porque}.`;
+}
+
+function showLiveNote(msg) {
+  const texto = msg ? liveNotice(msg) : '';
+  els.liveNoteText.textContent = texto;
+  els.liveNote.hidden = !texto;
+  els.liveNoteAction.hidden = !texto || msg.state !== 'downloadable';
+}
+
+// The pack installs from here rather than from Ajustes: this is the moment the
+// learner notices it is missing, and install() wants a user gesture.
+els.liveNoteAction.addEventListener('click', async () => {
+  els.liveNoteAction.disabled = true;
+  els.liveNoteText.textContent = 'Descargando el paquete de idioma…';
+  const ok = await installLive(settings.lang === 'es' ? 'es-ES' : 'en-US');
+  els.liveNoteAction.disabled = false;
+  els.liveNoteAction.hidden = ok;
+  els.liveNoteText.textContent = ok
+    ? 'Paquete instalado: la transcripción palabra por palabra entra en la próxima sesión.'
+    : 'No se pudo instalar el paquete de idioma.';
+});
 
 // Provisional text from the live layer. A debounce would reset on every interim
 // word and never fire while the speaker keeps talking, so this throttles: one
@@ -297,6 +338,9 @@ els.toggle.addEventListener('click', async () => {
   }
   await saveUi();
   setStatus('Iniciando captura…');
+  // Before START, never after: the offscreen document broadcasts LIVE_STATE from
+  // inside start(), so it lands while this await is still pending.
+  showLiveNote(null);
   const res = await chrome.runtime.sendMessage({ type: 'START' });
   if (res && res.ok) {
     setRunning(true);
@@ -353,14 +397,7 @@ chrome.runtime.onMessage.addListener((msg) => {
   else if (msg.type === 'PARTIAL') showPartial(msg.text);
   else if (msg.type === 'LIVE_STATE') {
     if (msg.state !== 'available') showPartial('');
-    const aviso = {
-      error: 'Transcripción en vivo desactivada: ' + (msg.detail || ''),
-      unsupported: 'Sin transcripción en vivo: este Chrome no la expone donde graba la extensión.',
-      unavailable: 'Sin transcripción en vivo: el reconocimiento local no está disponible aquí.',
-      downloadable: 'Sin transcripción en vivo: falta el paquete de idioma (instálalo en Ajustes).',
-      downloading: 'Descargando el paquete de idioma para la transcripción en vivo…',
-    }[msg.state];
-    if (aviso) setStatus(aviso, msg.state === 'downloading' ? 'info' : 'error');
+    showLiveNote(msg);
   }
   else if (msg.type === 'HINTS') showHints(msg);
   else if (msg.type === 'REPLY') showReply(msg);

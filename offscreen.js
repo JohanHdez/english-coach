@@ -12,6 +12,12 @@ const HINT_DEBOUNCE_MS = 1200;   // wait in case the other speaker keeps talking
 // (8000 tokens/min): 12 s allows at most 5 rounds a minute (~5.3k tokens),
 // leaving room for a suggested reply and even the report in the same minute.
 const HINT_COOLDOWN_MS = 12000;
+// A preview has to cost less than the interval that schedules it, or the lane
+// stops paying for itself: on the WASM fallback a single pass can take seconds,
+// and a real segment arriving mid-preview waits for it. Two slow rounds and the
+// lane retires for the rest of the session.
+const PREVIEW_MAX_MS = 1500;
+const PREVIEW_SLOW_ROUNDS = 2;
 
 const state = {
   running: false,
@@ -23,6 +29,9 @@ const state = {
   workerReady: false,
   queue: [],
   busy: false,
+  busyPreview: false,
+  previewSlow: 0,
+  previewOff: false,
   seq: 0,
   turns: [],
   hintTimer: null,
@@ -71,7 +80,15 @@ async function appendTranscript(entry) {
   state.turns = transcript;
   await store.set({ transcript });
   broadcast({ type: 'SEGMENT', entry: shown });
-  if (entry.speaker === 'them') { state.live?.reset(); scheduleHints(); }
+  if (entry.speaker === 'them') { clearPartial(); scheduleHints(); }
+}
+
+// Two provisional layers can feed the same line — Web Speech word by word, or a
+// throwaway Whisper pass over the phrase in progress — and the authoritative
+// segment retires whichever one was showing.
+function clearPartial() {
+  if (state.live) state.live.reset();
+  else broadcast({ type: 'PARTIAL', text: '' });
 }
 
 // ---------------------------------------------------------------- coach
@@ -251,19 +268,49 @@ function enqueue(seg) {
   } else {
     state.queue.push(seg);
   }
-  broadcast({ type: 'QUEUE', pending: state.queue.length + (state.busy ? 1 : 0) });
+  broadcast({ type: 'QUEUE', pending: pendingCount() });
   drain();
 }
 
+// Previews are invisible work: counting them would flash "Transcribiendo…" in
+// both interfaces every second while the other person is still speaking.
+const pendingCount = () =>
+  state.queue.filter((s) => !s.preview).length + (state.busy && !state.busyPreview ? 1 : 0);
+
 const queueIdle = () => !state.busy && state.queue.length === 0;
+
+// The provisional lane. It only covers the gap left when Chrome's on-device
+// speech recognition is unavailable: while that layer runs it is word by word
+// and strictly better, so the two never compete for the same line.
+function previewEligible() {
+  const s = state.settings || {};
+  return state.running
+    && !state.previewOff
+    && !state.live
+    // Before the model is loaded a preview would block on the download and take
+    // the real segments hostage behind it — and trip the slowness guard.
+    && state.workerReady
+    && s.liveTranscript !== false
+    // One Groq audio request per preview would exhaust the free tier in minutes.
+    // On that engine Web Speech stays the only live source.
+    && s.engine !== 'api';
+}
+
+function queuePreview(seg) {
+  if (!previewEligible()) return;
+  // Dropped, never queued: nothing provisional may delay a real turn, so a
+  // preview runs only while the engine has nothing else to do.
+  if (state.busy || state.queue.length) return;
+  state.queue.push({ ...seg, preview: true });
+  drain();
+}
 
 // The report only analyses the learner's own turns, which are exactly the ones
 // the queue defers. Without waiting here, an automatic report would omit them.
 async function waitForQueue(timeoutMs = 120000) {
   const until = Date.now() + timeoutMs;
   while (!queueIdle() && Date.now() < until) {
-    const pending = state.queue.length + (state.busy ? 1 : 0);
-    status(`Terminando de transcribir… (${pending} en cola)`, 'loading');
+    status(`Terminando de transcribir… (${pendingCount()} en cola)`, 'loading');
     await new Promise((r) => setTimeout(r, 250));
   }
   return queueIdle();
@@ -271,14 +318,27 @@ async function waitForQueue(timeoutMs = 120000) {
 
 async function drain() {
   if (state.busy || state.queue.length === 0) return;
-  state.busy = true;
   const seg = state.queue.shift();
+  // Settings are re-read on every coach call, so the engine can flip to the API
+  // mid-session. A preview queued before that must never become a Groq request:
+  // the lane is local-only, and provisional audio has no business leaving.
+  if (seg.preview && state.settings.engine === 'api') return drain();
+  state.busy = true;
+  state.busyPreview = !!seg.preview;
+  const startedAt = Date.now();
   try {
     const text = state.settings.engine === 'api'
       ? await apiTranscribe(seg.audio)
       : await localTranscribe(seg.audio);
     const clean = (text || '').trim();
-    if (!isJunk(clean)) {
+    if (seg.preview) {
+      if (Date.now() - startedAt > PREVIEW_MAX_MS && ++state.previewSlow >= PREVIEW_SLOW_ROUNDS) {
+        state.previewOff = true;
+        broadcast({ type: 'LIVE_STATE', state: 'slow', fallback: false });
+      }
+      // Provisional only: displayed, never stored, never given to the coach.
+      if (state.running && !isJunk(clean)) broadcast({ type: 'PARTIAL', text: clean });
+    } else if (!isJunk(clean)) {
       await appendTranscript({
         speaker: seg.speaker,
         text: clean,
@@ -288,13 +348,16 @@ async function drain() {
     } else if (seg.speaker === 'them') {
       // A discarded turn also clears the provisional line: otherwise it stays
       // frozen on screen until the other speaker talks again.
-      state.live?.reset();
+      clearPartial();
     }
   } catch (e) {
-    status('Error transcribiendo: ' + (e.message || e), 'error');
+    // A failed preview stays silent: the real segment reports the same problem
+    // a moment later, and one toast per second would bury it.
+    if (!seg.preview) status('Error transcribiendo: ' + (e.message || e), 'error');
   } finally {
     state.busy = false;
-    broadcast({ type: 'QUEUE', pending: state.queue.length + (state.busy ? 1 : 0) });
+    state.busyPreview = false;
+    broadcast({ type: 'QUEUE', pending: pendingCount() });
     drain();
   }
 }
@@ -311,6 +374,7 @@ async function attach(stream, speaker) {
   });
   const seg = new Segmenter(speaker, enqueue, () => Date.now(), {
     minSegMs: Number(state.settings?.minSegMs) || undefined,
+    onPreview: speaker === 'them' ? queuePreview : null,
   });
   node.port.onmessage = (e) => seg.push(e.data);
   src.connect(node);
@@ -326,6 +390,8 @@ async function start(streamId, settings, streamKind) {
   state.settings = settings;
   state.queue = [];
   state.seq = 0;
+  state.previewSlow = 0;
+  state.previewOff = false;
   state.segmenters = [];
   state.streams = [];
   const { transcript = [] } = (await store.get('transcript')) || {};
@@ -400,7 +466,7 @@ async function startLiveLayer(themStream) {
   const lang = state.settings?.lang === 'es' ? 'es-ES' : 'en-US';
   const estado = await liveAvailability(lang);
   if (estado !== 'available' && estado !== 'unknown') {
-    broadcast({ type: 'LIVE_STATE', state: estado });
+    broadcast({ type: 'LIVE_STATE', state: estado, fallback: previewFallback() });
     return;
   }
   const source = themStream.getAudioTracks()[0];
@@ -414,12 +480,19 @@ async function startLiveLayer(themStream) {
     onText: (text) => broadcast({ type: 'PARTIAL', text }),
     onError: (code) => {
       broadcast({ type: 'PARTIAL', text: '' });
-      broadcast({ type: 'LIVE_STATE', state: 'error', detail: String(code) });
+      broadcast({ type: 'LIVE_STATE', state: 'error', detail: String(code), fallback: previewFallback() });
       stopLiveLayer();
     },
   });
-  if (state.live) broadcast({ type: 'LIVE_STATE', state: 'available' });
+  broadcast(state.live
+    ? { type: 'LIVE_STATE', state: 'available' }
+    : { type: 'LIVE_STATE', state: 'unavailable', fallback: previewFallback() });
 }
+
+// Whether losing Web Speech actually costs the learner the live line. It does not
+// on the local engine: the preview lane still shows English, in ~1 s pieces
+// instead of word by word.
+const previewFallback = () => (state.settings || {}).engine !== 'api';
 
 function stopLiveLayer() {
   state.live?.stop();
@@ -432,6 +505,9 @@ function stopLiveLayer() {
 async function stop() {
   if (!state.running) return { ok: true };
   state.running = false;
+  // Provisional work is worthless once the session ended, and waitForQueue would
+  // otherwise wait on it before the report.
+  state.queue = state.queue.filter((s) => !s.preview);
   stopLiveLayer();
   for (const seg of state.segmenters || []) seg.flush();
   for (const s of state.streams) s.getTracks().forEach((t) => t.stop());
@@ -462,7 +538,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       else if (msg.type === 'SUGGEST_REPLY') sendResponse(await suggestReply());
       else if (msg.type === 'CONTEXT_CHANGED') { sendStarter(); sendResponse({ ok: true }); }
       else if (msg.type === 'REPORT') sendResponse(await makeReport(false));
-      else if (msg.type === 'STATE') sendResponse({ running: state.running, pending: state.queue.length });
+      else if (msg.type === 'STATE') sendResponse({ running: state.running, pending: pendingCount() });
       else sendResponse({ ok: false, error: 'Mensaje desconocido' });
     } catch (e) {
       status('Error: ' + (e.message || e), 'error');

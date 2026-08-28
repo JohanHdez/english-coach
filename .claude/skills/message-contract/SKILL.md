@@ -55,7 +55,7 @@ no real hints round has painted yet).
 | `REPLY` | `answer[]` (one item; its key term wrapped in `**`), `ideas[]` (each `{en, es}`), or `pending`, or `error` | overlay, sidepanel |
 | `QUEUE` | `pending` | overlay, sidepanel |
 | `PARTIAL` | `text` (English, provisional) | overlay, sidepanel |
-| `LIVE_STATE` | `state`, `detail?` | overlay, sidepanel |
+| `LIVE_STATE` | `state` (`available`, `unsupported`, `unavailable`, `downloadable`, `downloading`, `error`, or `slow` — the preview lane retired because a pass cost more than it saved), `detail?`, `fallback?` (the Whisper preview lane is standing in, so there *is* live text, just not word by word) | overlay, sidepanel |
 
 **offscreen ↔ worker** — plain `postMessage`, lowercase types, not part of this protocol:
 `init`, `transcribe` out; `progress`, `ready`, `result`, `error` back, correlated by `id`.
@@ -80,7 +80,11 @@ no real hints round has painted yet).
    negotiation and no fallback; a half-renamed type is a feature that stops working with no error.
 7. **Never put an API key, a raw audio buffer, or a `Float32Array` in a message.** Keys stay in
    storage; audio is transferred to the worker via `postMessage` transfer lists, not broadcast.
-8. **`PARTIAL` is provisional and never persisted.** It carries live Web Speech output that
-   Whisper will overwrite. It is not appended to `transcript`, never reaches the report, and is
-   not cached in `lastUi` — a re-injected overlay must come back with no stale partial on screen.
-   Every `SEGMENT` for `them` is followed by a `PARTIAL` with empty text that clears it.
+8. **`PARTIAL` is provisional and never persisted.** It carries either live Web Speech output or
+   a throwaway Whisper pass over the phrase still being spoken, and the authoritative segment
+   overwrites it. It is not appended to `transcript`, never reaches the report, and is not cached
+   in `lastUi` — a re-injected overlay must come back with no stale partial on screen. Every
+   `SEGMENT` for `them` is followed by a `PARTIAL` with empty text that clears it.
+9. **`LIVE_STATE` is cached in `lastUi`**, unlike `PARTIAL`. It describes a condition that holds
+   for the whole session, not a delta: an overlay injected after a page reload must come back
+   knowing the word-by-word layer is off, or it silently promises text that is never coming.

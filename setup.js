@@ -102,10 +102,19 @@ function wireCounter(campo, contador, max) {
 const countProfile = wireCounter('profile', 'profileCount', PROFILE_MAX_CHARS);
 const countContext = wireCounter('sessionContext', 'contextCount', CONTEXT_MAX_CHARS);
 
+// The session language decides which pack matters. Options has no language
+// control — it lives in the side panel — so it is read from storage here;
+// reporting on en-US while the learner runs Spanish sessions answers the wrong
+// question.
+async function liveLang() {
+  const { settings = {} } = await chrome.storage.local.get('settings');
+  return settings.lang === 'es' ? 'es-ES' : 'en-US';
+}
+
 async function checkLive() {
   const el = $('liveStatus');
   const boton = $('installLive');
-  const estado = await liveAvailability();
+  const estado = await liveAvailability(await liveLang());
   const [texto, clase] = LIVE_MSG[estado] || LIVE_MSG.unavailable;
   el.textContent = texto;
   el.className = 'hint' + (clase ? ' ' + clase : '');
@@ -117,7 +126,7 @@ $('installLive').addEventListener('click', async () => {
   $('installLive').disabled = true;
   el.textContent = 'Descargando el paquete de idioma…';
   el.className = 'hint';
-  const ok = await installLive();
+  const ok = await installLive(await liveLang());
   $('installLive').disabled = false;
   if (!ok) {
     el.textContent = 'No se pudo instalar el paquete de idioma';

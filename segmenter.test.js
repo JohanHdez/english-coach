@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   Segmenter, isJunk, floatToWav, foldIntoTranscript,
   CHUNK_MS, SILENCE_MS, MAX_SEG_MS, SOFT_CUT_MS, SOFT_SILENCE_MS, MIN_VOICED,
-  MERGE_GAP_MS, MERGE_MAX_CHARS,
+  MERGE_GAP_MS, MERGE_MAX_CHARS, PREVIEW_EVERY_MS, PREVIEW_MIN_MS,
 } from './segmenter.js';
 
 const VOICE = 0.5;
@@ -159,4 +159,90 @@ test('folding compares against the chronologically latest turn, not the last app
   ];
   foldIntoTranscript(tr, { speaker: 'me', text: 'arriving late', t: 6500, dur: 1 });
   assert.equal(tr.length, 3);
+});
+
+// ------------------------------------------------------------------ previews
+
+// Like run(), but keeps the phrase open: the preview lane is about what the
+// segmenter emits *before* anything closes.
+function runWithPreview(pattern, opts = {}) {
+  const segs = [];
+  const previews = [];
+  let t = 0;
+  const seg = new Segmenter('them', (s) => segs.push(s), () => t, {
+    onPreview: (p) => previews.push(p),
+    ...opts,
+  });
+  for (let i = 0; i < 10; i++) { t += CHUNK_MS; seg.push(block(QUIET)); }
+  for (const [amp, n] of pattern) {
+    for (let i = 0; i < n; i++) { t += CHUNK_MS; seg.push(block(amp)); }
+  }
+  return { seg, segs, previews };
+}
+
+test('an open phrase previews itself while it is still growing', () => {
+  const { segs, previews } = runWithPreview([[VOICE, 40]]);
+  assert.equal(segs.length, 0, 'nothing has closed the phrase yet');
+  assert.deepEqual(previews.map((p) => p.durationMs), [1200, 2400, 3600]);
+});
+
+test('a preview carries the audio captured so far, tagged with its speaker', () => {
+  const { previews } = runWithPreview([[VOICE, 40]]);
+  assert.ok(previews.length > 0, 'the phrase must have been previewed at all');
+  for (const p of previews) {
+    assert.equal(p.speaker, 'them');
+    assert.equal(p.audio.length, (p.durationMs / CHUNK_MS) * 1600);
+  }
+});
+
+test('speech shorter than PREVIEW_MIN_MS is never previewed', () => {
+  const short = PREVIEW_MIN_MS / CHUNK_MS - 4;
+  assert.equal(runWithPreview([[VOICE, short], [QUIET, 8]]).previews.length, 0);
+  // Positive control: the same shape, long enough, does preview.
+  assert.ok(runWithPreview([[VOICE, short + 8], [QUIET, 8]]).previews.length > 0);
+});
+
+test('silence alone is never previewed', () => {
+  const { previews } = runWithPreview([[QUIET, 60]]);
+  assert.equal(previews.length, 0);
+});
+
+test('previews are spaced by PREVIEW_EVERY_MS', () => {
+  const { previews } = runWithPreview([[VOICE, 100]]);
+  assert.ok(previews.length >= 3, `expected several previews, got ${previews.length}`);
+  for (let i = 1; i < previews.length; i++) {
+    assert.equal(previews[i].durationMs - previews[i - 1].durationMs, PREVIEW_EVERY_MS);
+  }
+});
+
+test('a preview never steals audio from the real segment', () => {
+  const { seg, segs, previews } = runWithPreview([[VOICE, 40]]);
+  seg.flush();
+  assert.ok(previews.length > 0, 'the phrase must have been previewed at all');
+  assert.equal(segs.length, 1);
+  assert.equal(segs[0].audio.length, 42 * 1600, 'the closed segment keeps every chunk');
+});
+
+test('the push that cuts the phrase emits the segment, not another preview', () => {
+  // The authoritative text lands on that same push; a provisional copy of the
+  // very same audio would only flicker on screen before being replaced.
+  const { segs, previews } = runWithPreview([[VOICE, 40], [QUIET, 3]], { previewEveryMs: CHUNK_MS });
+  assert.equal(segs.length, 1);
+  assert.ok(previews.length > 0, 'with no throttle every push before the cut previews');
+  assert.ok(!previews.some((p) => p.durationMs === segs[0].durationMs),
+    'a preview duplicated the audio of the segment that just closed');
+});
+
+test('each piece of a monologue previews on its own', () => {
+  const pattern = [];
+  for (let i = 0; i < 3; i++) pattern.push([VOICE, 45], [QUIET, 3]);
+  const { segs, previews } = runWithPreview(pattern);
+  assert.ok(segs.length >= 2, `expected a stream of pieces, got ${segs.length}`);
+  assert.ok(previews.some((p, i) => i > 0 && p.durationMs < previews[i - 1].durationMs),
+    'the preview clock must restart at each soft cut instead of growing across pieces');
+});
+
+test('without an onPreview callback the segmenter behaves exactly as before', () => {
+  const withOut = run([[VOICE, 40], [QUIET, 12]]);
+  assert.equal(withOut.length, 1);
 });

@@ -8,7 +8,7 @@ const OFFSCREEN_URL = 'offscreen.html';
 let sessionTabId = null;
 let running = false;
 let coachWindowId = null;
-const lastUi = { hints: null, reply: null, status: null };
+const lastUi = { hints: null, reply: null, status: null, live: null };
 
 // When a tab is shared, Chrome can leave the user in a window with no side panel
 // and no extension bar: a system notification is the only thing they are
@@ -208,6 +208,7 @@ async function attachOverlay(tabId) {
   } catch { /* la declaración de content_scripts ya lo habrá puesto */ }
   try {
     await chrome.tabs.sendMessage(tabId, { target: 'ui', type: 'RUNNING', running: true });
+    if (lastUi.live) await chrome.tabs.sendMessage(tabId, lastUi.live);
     if (lastUi.hints) await chrome.tabs.sendMessage(tabId, lastUi.hints);
     if (lastUi.reply) await chrome.tabs.sendMessage(tabId, lastUi.reply);
   } catch { /* la pestaña no admite overlay */ }
@@ -269,6 +270,12 @@ async function startCapture(settings, invocation = {}) {
   sessionTabId = tab.id;
 
   let res = null;
+  // Cleared before the start, not after: the offscreen document broadcasts
+  // LIVE_STATE from inside its own start(), so by the time sendStart resolves the
+  // cache already holds this session's value and wiping it would lose the notice.
+  lastUi.hints = null;
+  lastUi.reply = null;
+  lastUi.live = null;
 
   if (settings.themSource === 'tab') {
     if (/^(chrome|edge|about|chrome-extension|devtools):/.test(tab.url || '')) {
@@ -314,8 +321,6 @@ async function startCapture(settings, invocation = {}) {
   }
 
   running = true;
-  lastUi.hints = null;
-  lastUi.reply = null;
   await chrome.storage.local.set({ lastError: null });
   // The tab may have been open since before the extension was installed.
   attachOverlay(tab.id);
@@ -334,6 +339,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (msg.type === 'HINTS') lastUi.hints = msg;
     if (msg.type === 'REPLY' && !msg.pending) lastUi.reply = msg;
     if (msg.type === 'STATUS') lastUi.status = msg;
+    // Not a delta but a condition of the session: an overlay injected after a
+    // reload must come back knowing the live layer is off, or it silently
+    // promises word-by-word text that is never coming.
+    if (msg.type === 'LIVE_STATE') lastUi.live = msg;
     relayToTab(msg);
     return;
   }
@@ -390,6 +399,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             hints: lastUi.hints,
             reply: lastUi.reply,
             status: lastUi.status,
+            live: lastUi.live,
             translate: settings.translate !== false && settings.lang !== 'es',
           });
           break;

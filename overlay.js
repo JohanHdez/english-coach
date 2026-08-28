@@ -101,6 +101,8 @@
     .status { color: #9aa0a6; font-size: 11px; margin: 0 0 7px; }
     .status.error { color: #ef6a5c; }
     .status.ok { color: #51cf66; }
+    .live-note { color: #d9a441; font-size: 10.5px; margin: -4px 0 7px; line-height: 1.35; }
+    .card.idle .live-note { display: none; }
 
     .chips { display: flex; flex-wrap: wrap; gap: 5px; }
     .chip {
@@ -194,6 +196,7 @@
       </div>
       <div class="body">
         <p class="status">Grabando…</p>
+        <p class="live-note" hidden></p>
         <div class="chips"></div>
         <p class="nudge"></p>
         <div class="hint-openers reply-group" hidden>
@@ -313,6 +316,32 @@
       box.append(div);
     }
     box.scrollTop = box.scrollHeight;
+  }
+
+  // What the learner loses when Chrome's on-device recognition is missing depends
+  // on whether the Whisper preview lane can stand in: with it there is still live
+  // English, in ~1 s pieces instead of word by word. Saying "sin transcripción en
+  // vivo" when text is in fact appearing would just read as a broken extension.
+  function liveNotice({ state: st, detail, fallback }) {
+    if (!st || st === 'available' || st === 'unknown') return '';
+    if (st === 'downloading') return 'Descargando el paquete de idioma…';
+    const porque = {
+      unsupported: 'este Chrome no lo expone donde grabamos',
+      unavailable: 'el reconocimiento local no está disponible aquí',
+      downloadable: 'falta el paquete de idioma',
+      slow: 'este equipo transcribe demasiado despacio',
+      error: detail ? 'falló el reconocimiento local (' + detail + ')' : 'falló el reconocimiento local',
+    }[st] || 'el reconocimiento local no está disponible aquí';
+    return fallback
+      ? 'En vivo con Whisper, no palabra por palabra: ' + porque + '.'
+      : 'Sin transcripción en vivo: ' + porque + '.';
+  }
+
+  function showLiveNote(msg) {
+    const el = $('.live-note');
+    const texto = msg ? liveNotice(msg) : '';
+    el.textContent = texto;
+    el.hidden = !texto;
   }
 
   // Interim results arrive word by word. A debounce would reset on every word and
@@ -516,7 +545,7 @@
       case 'RUNNING':
         setMode(msg.running ? 'running' : 'idle');
         if (msg.running) { show(true); setStatus('Grabando…', 'ok'); }
-        else { showPartial(''); setStatus('Sesión terminada. El informe se está generando.'); }
+        else { showPartial(''); showLiveNote(null); setStatus('Sesión terminada. El informe se está generando.'); }
         break;
       case 'STATUS': if (msg.show) show(true); setStatus(msg.text, msg.kind); break;
       case 'SEGMENT': show(true); addTurn(msg.entry); break;
@@ -524,7 +553,7 @@
       case 'REPLY': show(true); showReply(msg); break;
       case 'QUEUE': if (msg.pending > 0) setStatus(`Transcribiendo… (${msg.pending})`); break;
       case 'PARTIAL': if (msg.text) show(true); showPartial(msg.text); break;
-      case 'LIVE_STATE': if (msg.state !== 'available') showPartial(''); break;
+      case 'LIVE_STATE': if (msg.state !== 'available') showPartial(''); showLiveNote(msg); break;
       default: break;
     }
   });
@@ -563,6 +592,7 @@
       setMode('running');
       show(true);
       setStatus('Grabando…', 'ok');
+      showLiveNote(st.live);
       for (const t of st.turns || []) addTurn(t);
       if (st.hints) showHints(st.hints);
     })
