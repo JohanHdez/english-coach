@@ -843,7 +843,9 @@ git commit -m "feat(coach): per-provider token budget and the distiller call"
 
 **Interfaces:**
 - Consumes: `normalizeText` from `memory.js` (Task 3).
-- Produces: `MIN_CONTENT_TERMS`, `SCORE_FLOOR`, `EVIDENCE_TURNS`, `QUERY_MAX_CHARS`, `tokenize(text) → string[]`, `buildIndex(turns) → { idf, N }`, `queryFrom(turns) → string`, `scoreTurns(corpus, query, index) → { terms, scored }`.
+- Produces: `MIN_CONTENT_TERMS`, `SCORE_FLOOR`, `EVIDENCE_TURNS`, `QUERY_MAX_CHARS`, `tokenize(text) → string[]`, `buildIndex(turns) → { idf, N, floor }`, `queryFrom(turns) → string`, `scoreTurns(corpus, query, index) → { terms, scored }`.
+
+`floor` is the IDF assigned to a query term that appears in no turn at all. Without it those terms weigh zero and a question made entirely of unseen words scores as a perfect match against anything.
 
 - [ ] **Step 1: Write the failing test**
 
