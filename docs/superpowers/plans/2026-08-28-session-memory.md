@@ -229,8 +229,10 @@ test('selectChunk cuts at the largest silence inside the band', () => {
   // Each turn is ~500 chars. The band for 1800 is [1440, 2160], so the cut can
   // land after turn 3 (~1500) or turn 4 (~2000). Turn 3 is followed by a 6 s
   // silence and turn 4 by 200 ms, so the cut must land after turn 3.
+  // No turn sits at t=0: that is the "nothing covered yet" sentinel, and a turn
+  // there would be filtered out by `t.t > covered`, shifting the whole trace.
   const turns = [
-    turn('them', filler(100), 0, 5),
+    turn('them', filler(100), 1000, 5),
     turn('me', filler(100), 6000, 5),
     turn('them', filler(100), 12000, 5),
     turn('me', filler(100), 23000, 5),   // 6 s gap before this one
@@ -242,7 +244,7 @@ test('selectChunk cuts at the largest silence inside the band', () => {
 });
 
 test('selectChunk caps a backlogged chunk instead of sending one huge block', () => {
-  const turns = Array.from({ length: 40 }, (_, i) => turn(i % 2 ? 'me' : 'them', filler(100), i * 1000, 0.5));
+  const turns = Array.from({ length: 40 }, (_, i) => turn(i % 2 ? 'me' : 'them', filler(100), 1000 + i * 1000, 0.5));
   const chunk = selectChunk(turns, { coveredUntil: 0 }, 1800);
   assert.ok(chunk.chars <= 1800 * 1.5);
 });
