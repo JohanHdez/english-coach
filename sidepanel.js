@@ -376,7 +376,9 @@ els.download.addEventListener('click', () => {
 
 els.clear.addEventListener('click', async () => {
   entries = [];
-  await chrome.storage.local.set({ transcript: [] });
+  // The memory is a distillation of this transcript: keeping it would leave the
+  // coach narrating a conversation the learner just deleted.
+  await chrome.storage.local.set({ transcript: [], memory: null });
   render();
   els.chips.innerHTML = '';
   els.nudge.textContent = '';
