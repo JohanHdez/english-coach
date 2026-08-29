@@ -199,8 +199,31 @@ export function turnsToText(turns, limit = 10, maxChars = Infinity) {
   return kept.join('\n');
 }
 
-// Leaves room for the system prompt and the 2800 output tokens within the free minute.
-const REPORT_MAX_CHARS = 12000;
+// Distilled topics now cover the region this used to cut silently, so the tail
+// can shrink to pay for them: coverage goes up while the token cost stays flat.
+const REPORT_MAX_CHARS = 8000;
+
+export const coverageOf = (m = {}) => {
+  const total = (m.rounds || 0) + (m.skipped || 0);
+  return total ? Math.round(((m.rounds || 0) / total) * 100) : 100;
+};
+
+// The distilled record of the whole conversation, so the summary stops being
+// built from whatever fitted in the tail.
+export function memoryBlock(memory) {
+  if (!memory) return '';
+  const { topics = [], open = [], errors = [] } = memory;
+  if (!topics.length && !open.length && !errors.length) return '';
+  const parts = [];
+  if (topics.length) parts.push('TEMAS REGISTRADOS (cubren toda la conversación):\n'
+    + topics.map((t) => `  · ${t.text}`).join('\n'));
+  if (open.length) parts.push('PENDIENTES REGISTRADOS:\n' + open.map((t) => `  · ${t.text}`).join('\n'));
+  if (errors.length) parts.push('ERRORES DETECTADOS (ya verificados contra la transcripción):\n'
+    + errors.map((e) => `  · ${e.wrong} → ${e.right} [${e.kind}] — dijo: "${e.said}"`).join('\n'));
+  const cobertura = coverageOf(memory);
+  if (cobertura < 100) parts.push(`COBERTURA: la memoria cubre aproximadamente el ${cobertura}% de la conversación.`);
+  return parts.join('\n\n');
+}
 
 // Spanish-session override, appended to the live prompts: same structure and
 // fields, but the phrases to say are Spanish and a gloss is pointless for a
@@ -534,6 +557,12 @@ inexistentes o jerga técnica deformada («request quid», «ray-tree after heat
 el reconocedor destrozando un término técnico, no un error del alumno: trátala como ruido y no
 la lleves a la tabla de gramática.
 
+El «Resumen de la reunión» se construye A PARTIR DE LOS TEMAS REGISTRADOS que se te entregan: no
+añadas ningún tema que no esté en esa lista. Los «Pendientes» salen únicamente de los PENDIENTES
+REGISTRADOS. La tabla de errores parte de los ERRORES DETECTADOS: explícalos y ordénalos por
+importancia; puedes añadir como máximo dos más que encuentres en la transcripción.
+Si se te indica una COBERTURA por debajo del 100%, dilo en una línea al final del resumen.
+
 Responde en español, en Markdown, con exactamente estas secciones:
 
 ## Resumen de la reunión
@@ -561,6 +590,10 @@ el momento real de la conversación donde encajaba.
 ## Fluidez
 Muletillas, repeticiones, frases inacabadas. Menciónalo solo si hay evidencia en la transcripción.
 
+## Lo que tienes que aprender
+Las 5 frases o palabras que más te conviene memorizar a partir de tus propios errores de hoy.
+Cada una con el inglés en negrita, una glosa corta en español y la frase real donde falló.
+
 ## Nivel y plan
 Nivel CEFR aproximado con una frase de justificación, tres ejercicios concretos para esta semana
 y un consejo profesional de coach: qué hacer distinto en la próxima conversación para que cada
@@ -575,6 +608,12 @@ real EN ESPAÑOL de un profesional hispanohablante (por ejemplo, una entrevista 
 conversación; el resto de secciones analiza SOLO las intervenciones del cliente.
 La transcripción viene de reconocimiento automático: palabras inexistentes o jerga deformada
 son ruido del reconocedor, no errores del cliente — ignóralas.
+
+El «Resumen de la reunión» se construye A PARTIR DE LOS TEMAS REGISTRADOS que se te entregan: no
+añadas ningún tema que no esté en esa lista. Los «Pendientes» salen únicamente de los PENDIENTES
+REGISTRADOS. La tabla de errores parte de los ERRORES DETECTADOS: explícalos y ordénalos por
+importancia; puedes añadir como máximo dos más que encuentres en la transcripción.
+Si se te indica una COBERTURA por debajo del 100%, dilo en una línea al final del resumen.
 
 Responde en español, en Markdown, con exactamente estas secciones:
 
@@ -598,15 +637,20 @@ transcripción.
 4 o 5 fórmulas que encajaban en esta conversación (para estructurar una respuesta, ganar unos
 segundos, cerrar un punto), cada una con el momento real donde encajaba.
 
+## Lo que tienes que aprender
+Las 5 frases o palabras que más te conviene memorizar a partir de tus propios errores de hoy.
+Cada una con el inglés en negrita, una glosa corta en español y la frase real donde falló.
+
 ## Plan
 Tres ejercicios concretos para esta semana y un consejo profesional de coach: qué hacer distinto
 en la próxima conversación para que cada una mejore la anterior.`;
 
-export async function askReport({ turns, settings }) {
+export async function askReport({ turns, settings, memory = null }) {
   const mine = turns.filter((t) => t.speaker === 'me').length;
   if (mine === 0) throw new CoachError('No hay intervenciones tuyas para analizar.');
   const texto = turnsToText(turns, 400, REPORT_MAX_CHARS);
   const recortada = texto.split('\n').length < turns.length;
+  const recuerdo = memoryBlock(memory);
   return ask({
     provider: settings.reportProvider,
     model: settings.reportModel,
@@ -614,6 +658,7 @@ export async function askReport({ turns, settings }) {
     system: settings.lang === 'es' ? REPORT_SYSTEM_ES : REPORT_SYSTEM,
     user: `Nivel declarado: ${settings.level}. Contexto: ${settings.situation}.`
       + `${profileBlock(settings)}${contextBlock(settings)}\n\n`
+      + (recuerdo ? `${recuerdo}\n\n` : '')
       + `Transcripción${recortada ? ' (sólo la parte final de la conversación)' : ' completa'}:\n${texto}`,
     maxTokens: 2800,
   });

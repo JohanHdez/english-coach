@@ -280,7 +280,7 @@ async function makeReport(auto = false) {
   }
   try {
     state.ledger.spend('report');
-    const markdown = await askReport({ turns: sortedTurns(), settings });
+    const markdown = await askReport({ turns: sortedTurns(), settings, memory: await loadMemory() });
     const asText = sortedTurns()
       .map((e) => `**${e.speaker === 'me' ? 'Yo' : 'Interlocutor'}**: ${e.text}`)
       .join('\n\n');

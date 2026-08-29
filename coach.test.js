@@ -143,3 +143,26 @@ test('a continuation neither claims nor denies earlier coverage', () => {
   assert.ok(!out.includes('LITERAL RECORD'));
   assert.ok(!out.includes('NOTHING earlier'));
 });
+
+import { memoryBlock, coverageOf } from './coach.js';
+
+test('coverageOf reports the share of rounds that actually ran', () => {
+  assert.equal(coverageOf({ rounds: 8, skipped: 2 }), 80);
+  assert.equal(coverageOf({ rounds: 0, skipped: 0 }), 100);
+});
+
+test('memoryBlock lists the recorded topics, commitments and mistakes', () => {
+  const out = memoryBlock({
+    rounds: 2, skipped: 0,
+    topics: [{ text: 'Migration planned for Q2', quote: 'q', t: 1 }],
+    open: [{ text: 'Send the estimate on Friday', quote: 'q', t: 2 }],
+    errors: [{ wrong: 'depends of', right: 'depends on', kind: 'grammar', said: 'it depends of the load', t: 3 }],
+  });
+  assert.match(out, /Migration planned for Q2/);
+  assert.match(out, /Send the estimate on Friday/);
+  assert.match(out, /depends of → depends on/);
+});
+
+test('memoryBlock is empty when nothing was distilled', () => {
+  assert.equal(memoryBlock({ rounds: 0, skipped: 0, topics: [], open: [], errors: [] }), '');
+});
