@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { parseReply, parseHints, turnsToText, contextBlock, CONTEXT_MAX_CHARS } from './coach.js';
+import { parseDistill, tpmOf, PROVIDERS } from './coach.js';
 
 test('parseReply returns one speakable answer and two study ideas, cleaned', () => {
   const raw = JSON.stringify({
@@ -85,4 +86,33 @@ test('contextBlock carries the notes, capped at the limit', () => {
   const long = contextBlock({ sessionContext: 'x'.repeat(CONTEXT_MAX_CHARS + 500) });
   assert.ok(!long.includes('x'.repeat(CONTEXT_MAX_CHARS + 1)));
   assert.ok(long.includes('x'.repeat(CONTEXT_MAX_CHARS)));
+});
+
+test('every provider declares a per-minute budget', () => {
+  for (const spec of Object.values(PROVIDERS)) assert.ok('tpm' in spec);
+});
+
+test('tpmOf takes the tightest budget in play', () => {
+  assert.equal(tpmOf({ liveProvider: 'groq', reportProvider: 'groq' }), 8000);
+  assert.equal(tpmOf({ liveProvider: 'anthropic', reportProvider: 'anthropic' }), null);
+  // Mixed: the metered half is the one that can 429, so it sets the policy.
+  assert.equal(tpmOf({ liveProvider: 'groq', reportProvider: 'anthropic' }), 8000);
+  assert.equal(tpmOf({ liveProvider: 'nope', reportProvider: 'nope' }), 8000);
+});
+
+test('parseDistill returns the four groups and tolerates missing ones', () => {
+  const out = parseDistill(JSON.stringify({ topics: [{ text: 'a', quote: 'bbbbbbbbbbbb' }] }));
+  assert.equal(out.topics.length, 1);
+  assert.deepEqual(out.open, []);
+  assert.deepEqual(out.errors, []);
+  assert.equal(out.carry, '');
+});
+
+test('parseDistill reads a fenced JSON block', () => {
+  const raw = '```json\n{"topics":[],"open":[],"errors":[],"carry":"still on pricing"}\n```';
+  assert.equal(parseDistill(raw).carry, 'still on pricing');
+});
+
+test('parseDistill throws on unusable output rather than returning a shell', () => {
+  assert.throws(() => parseDistill('the model said hello'));
 });

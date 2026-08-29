@@ -7,12 +7,16 @@ export const PROVIDERS = {
     cost: 'gratis, sin tarjeta',
     keyField: 'groqKey',
     models: ['openai/gpt-oss-20b', 'openai/gpt-oss-120b', 'groq/compound-mini'],
+    // Free-plan window, shared across every call. It is the only provider fact
+    // the memory layer needs: chunk size and cadence derive from it.
+    tpm: 8000,
   },
   anthropic: {
     label: 'Claude',
     cost: 'de pago por uso',
     keyField: 'anthropicKey',
     models: ['claude-haiku-4-5-20251001', 'claude-sonnet-5', 'claude-opus-5'],
+    tpm: null,
   },
 };
 
@@ -299,6 +303,111 @@ export async function askStarter({ settings }) {
     schema: HINT_SCHEMA,
   });
   return parseHints(raw);
+}
+
+// --- 1c. Rolling distillation of the conversation ----------------------------
+
+// The live provider runs the hints and the distiller; the report provider runs the
+// reply and the report. They can differ, and the ledger pools them, so the policy
+// takes the tightest window in play: with one metered half, a 429 is still on the
+// table. An unknown provider is assumed metered — over-restricting costs a skipped
+// round, under-restricting costs a 429 in the middle of a meeting.
+export function tpmOf(settings = {}) {
+  const budgets = [settings.liveProvider, settings.reportProvider]
+    .map((p) => (PROVIDERS[p] ? PROVIDERS[p].tpm : 8000))
+    .filter((t) => t !== null);
+  return budgets.length ? Math.min(...budgets) : null;
+}
+
+const DISTILL_SYSTEM = `You maintain a running memory of a live conversation for a language coach.
+"LEARNER" is the person being coached; "OTHER" is the person they are talking to.
+
+Read ONLY the NEW FRAGMENT. The CONTEXT section is already processed: use it for continuity,
+never extract from it.
+
+Return:
+"topics": up to 3 things actually discussed that will matter later. Each has "text" (one short
+sentence, in the language of the transcript) and "quote" (at least 12 characters copied EXACTLY
+from the new fragment).
+"open": commitments or unresolved items — something to review, send, decide or schedule. Same
+shape as topics. Empty array if there are none.
+"errors": mistakes in the LEARNER's own lines. Each has "wrong" (the exact wrong words, copied
+EXACTLY from a LEARNER line, at most 8 words), "right" (the corrected form) and "kind", one of
+"grammar", "calque" (a literal translation from Spanish) or "register".
+"carry": one line naming the thread still open where the fragment ends, or "" if it closed cleanly.
+
+The transcript comes from automatic speech recognition. A phrase with nonexistent words or
+mangled technical jargon ("request quid", "ray-tree after heater") is almost always the recogniser
+destroying a term, not a learner mistake: treat it as noise and never report it.
+
+When in doubt, leave it out. A missing item costs nothing; an invented one poisons a record that
+is kept. Reply ONLY with JSON.`;
+
+const QUOTED_ITEMS = {
+  type: 'array',
+  items: {
+    type: 'object',
+    properties: { text: { type: 'string' }, quote: { type: 'string' } },
+    required: ['text', 'quote'],
+    additionalProperties: false,
+  },
+};
+
+const DISTILL_SCHEMA = {
+  type: 'object',
+  properties: {
+    topics: QUOTED_ITEMS,
+    open: QUOTED_ITEMS,
+    errors: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          wrong: { type: 'string' },
+          right: { type: 'string' },
+          kind: { type: 'string', enum: ['grammar', 'calque', 'register'] },
+        },
+        required: ['wrong', 'right', 'kind'],
+        additionalProperties: false,
+      },
+    },
+    carry: { type: 'string' },
+  },
+  required: ['topics', 'open', 'errors', 'carry'],
+  additionalProperties: false,
+};
+
+// Shape only. Whether any of this is true is decided in memory.js, against the
+// transcript, without asking the model anything.
+export function parseDistill(raw) {
+  const parsed = parseJsonLoose(raw);
+  if (!parsed) throw new CoachError('Respuesta de destilación no válida.');
+  const list = (v) => (Array.isArray(v) ? v : []);
+  return {
+    topics: list(parsed.topics),
+    open: list(parsed.open),
+    errors: list(parsed.errors),
+    carry: typeof parsed.carry === 'string' ? parsed.carry.trim() : '',
+  };
+}
+
+// Runs on the live (cheap) model: this is background work that must never
+// compete with the reply the learner is waiting for.
+export async function askDistill({ chunk, settings }) {
+  const raw = await ask({
+    provider: settings.liveProvider,
+    model: settings.liveModel,
+    keys: settings,
+    system: DISTILL_SYSTEM,
+    user: `Situation: ${settings.situation}.`
+      + (chunk.carry ? `\n\nThe previous fragment ended while discussing: ${chunk.carry}` : '')
+      + (chunk.overlap ? `\n\nCONTEXT (already processed, do not extract):\n${chunk.overlap}` : '')
+      + `\n\nNEW FRAGMENT:\n${chunk.text}`,
+    // Reasoning models spend from the same budget before writing the JSON.
+    maxTokens: 900,
+    schema: DISTILL_SCHEMA,
+  });
+  return parseDistill(raw);
 }
 
 // --- 2. Full reply on demand (keyboard shortcut) -----------------------------
