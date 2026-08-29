@@ -1365,7 +1365,8 @@ const saveMemory = (memory) => { state.memory = memory; return store.set({ memor
 // reply on every provider, a busy transcription queue, and — only where a
 // per-minute budget exists — a hints round.
 function distillEligible(settings) {
-  if (state.distillBusy || state.replyBusy) return false;
+  // Not distillBusy: by the time this runs the round has already claimed the mutex.
+  if (state.replyBusy) return false;
   if (!queueIdle()) return false;
   if (tpmOf(settings) && state.hintBusy) return false;
   if (Date.now() - state.lastDistillAt < DISTILL_COOLDOWN_MS) return false;
@@ -1373,33 +1374,37 @@ function distillEligible(settings) {
 }
 
 async function distill({ force = false } = {}) {
-  // Checked before the first await, so a segment arriving mid-round cannot load a
-  // second copy of the memory. The forced flush waits its turn instead of bailing:
-  // it is the last chance to distil before the report.
+  // The forced flush waits its turn instead of bailing: it is the last chance to
+  // distil before the report.
   if (state.distillBusy) {
     if (!force) return false;
     await state.distillBusy.catch(() => {});
   }
 
-  const settings = await ensureSettings();
-  const memory = await loadMemory();
-  const { chunkChars } = sizing(tpmOf(settings));
-  const chunk = selectChunk(state.turns, memory, chunkChars, { all: force });
-  if (!chunk) return false;
-  if (!force && !distillEligible(settings)) {
-    // One skipped round, not one per segment that arrives while it stays skipped:
-    // `skipped` divides into the coverage figure the report states out loud.
-    if (state.lastSkippedAt !== chunk.endsAt) {
-      state.lastSkippedAt = chunk.endsAt;
-      memory.skipped++;
-      await saveMemory(memory);
-    }
-    return false;
-  }
-
+  // Claimed here, synchronously, with no await between the check above and this
+  // line. Claiming it later — after ensureSettings and loadMemory — would let two
+  // calls both pass the check, each load its own copy of the memory, and the
+  // second overwrite the first's promise: the very bug the mutex exists to stop.
   let release;
   state.distillBusy = new Promise((r) => { release = r; });
+  let memory = null;
   try {
+    const settings = await ensureSettings();
+    memory = await loadMemory();
+    const { chunkChars } = sizing(tpmOf(settings));
+    const chunk = selectChunk(state.turns, memory, chunkChars, { all: force });
+    if (!chunk) return false;
+    if (!force && !distillEligible(settings)) {
+      // One skipped round, not one per segment that arrives while it stays skipped:
+      // `skipped` divides into the coverage figure the report states out loud.
+      if (state.lastSkippedAt !== chunk.endsAt) {
+        state.lastSkippedAt = chunk.endsAt;
+        memory.skipped++;
+        await saveMemory(memory);
+      }
+      return false;
+    }
+
     state.ledger.spend('distill');
     const raw = await askDistill({ chunk: { ...chunk, carry: memory.carry }, settings });
 
@@ -1423,8 +1428,8 @@ async function distill({ force = false } = {}) {
   } catch {
     // Silent by design: a missing key or a 429 is already surfaced by the hints
     // round, and the reply keeps working on the tail plus literal retrieval.
-    memory.skipped++;
-    await saveMemory(memory);
+    // `memory` is null when the throw came from ensureSettings or loadMemory.
+    if (memory) { memory.skipped++; await saveMemory(memory).catch(() => {}); }
     return false;
   } finally {
     state.distillBusy = null;
