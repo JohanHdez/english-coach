@@ -434,7 +434,11 @@ If a background section is provided, ground personal answers in those real facts
 conceptual knowledge is fair game: teach them the right answer. What you must never invent is
 their biography — employers, job titles, numbers or achievements not stated in the background:
 the learner has to say this out loud as the truth. If the background does not cover a personal
-question, stay honest and general rather than fabricating detail.`;
+question, stay honest and general rather than fabricating detail.
+
+Facts about THIS conversation may come only from the LITERAL RECORD block. The SITUATION block
+orients you and is not quotable as fact. Never say or imply that something was discussed unless
+it appears in the LITERAL RECORD.`;
 
 const REPLY_ITEMS = {
   type: 'array',
@@ -472,7 +476,33 @@ export function parseReply(raw) {
   return { answer, ideas };
 }
 
-export async function askReply({ turns, settings }) {
+// Three sources with three different truth rules. The reply already separated two
+// of them — biography is not invented, technical knowledge is fair game — and this
+// adds the third: what the conversation actually contains.
+export function contextBlocks(context) {
+  if (!context) return '';
+  const parts = [];
+  if (context.situation?.length) {
+    parts.push('SITUATION (background — orients you, NOT quotable as fact)\n'
+      + context.situation.map((s) => `  · ${s.text}`).join('\n'));
+  }
+  if (context.evidence?.length) {
+    parts.push('LITERAL RECORD (exact words spoken earlier — you may rely on these)\n'
+      + context.evidence.map((t) => `  · ${t.speaker === 'me' ? 'LEARNER' : 'OTHER'}: "${t.text}"`).join('\n'));
+  } else if (context.mode === 'new') {
+    // An absent block invites the model to fill the gap; a declared absence does not.
+    parts.push('NOTHING earlier in this conversation covers this question. Do not imply it was discussed.');
+  }
+  if (context.tail) parts.push(`RECENT (the immediate thread)\n${context.tail}`);
+  return parts.join('\n\n');
+}
+
+export async function askReply({ turns, settings, context = null }) {
+  const conversation = context
+    ? contextBlocks(context)
+    // No prepared context (no memory yet, or a caller that predates it): the old
+    // character-capped tail, which is still correct, just short-sighted.
+    : `RECENT (the immediate thread)\n${turnsToText(turns, 10, 1200)}`;
   // The report's (bigger) model, not the live one: the reply is on demand, so the
   // extra latency is paid once, and knowledge questions need the stronger model.
   const raw = await ask({
@@ -482,10 +512,7 @@ export async function askReply({ turns, settings }) {
     system: REPLY_SYSTEM + langMode(settings),
     user: `Learner level: ${settings.level}. Context: ${settings.situation}.`
       + `${profileBlock(settings)}${contextBlock(settings)}`
-      // Capped by characters, not turns: soft cuts split one long question into
-      // many small segments, so a turn count could drop the question itself. The
-      // cap keeps it whole while bounding cost and latency.
-      + `\n\nConversation so far:\n${turnsToText(turns, 10, 1200)}`
+      + `\n\n${conversation}`
       + `\n\nAnswer the other person's last turn for the learner: one speakable answer, then two study ideas.`,
     // The JSON itself is ~200 tokens, but gpt-oss models spend reasoning tokens
     // from the same budget BEFORE writing it: a tight cap truncates the JSON and

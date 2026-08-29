@@ -116,3 +116,31 @@ test('parseDistill reads a fenced JSON block', () => {
 test('parseDistill throws on unusable output rather than returning a shell', () => {
   assert.throws(() => parseDistill('the model said hello'));
 });
+
+// append to coach.test.js
+import { contextBlocks } from './coach.js';
+
+test('an anchored context prints the literal record', () => {
+  const out = contextBlocks({
+    mode: 'anchored',
+    situation: [{ text: 'Migration planned for Q2' }],
+    evidence: [{ speaker: 'me', text: 'the migration is in Q2' }],
+    tail: 'OTHER: and the budget?',
+  });
+  assert.match(out, /SITUATION/);
+  assert.match(out, /LITERAL RECORD/);
+  assert.match(out, /the migration is in Q2/);
+  assert.match(out, /OTHER: and the budget\?/);
+});
+
+test('a new question states the absence instead of omitting the block', () => {
+  const out = contextBlocks({ mode: 'new', situation: [], evidence: [], tail: 'OTHER: what is a promise?' });
+  assert.match(out, /NOTHING earlier in this conversation covers this question/);
+  assert.ok(!out.includes('LITERAL RECORD'));
+});
+
+test('a continuation neither claims nor denies earlier coverage', () => {
+  const out = contextBlocks({ mode: 'continuation', situation: [], evidence: [], tail: 'OTHER: and why?' });
+  assert.ok(!out.includes('LITERAL RECORD'));
+  assert.ok(!out.includes('NOTHING earlier'));
+});
