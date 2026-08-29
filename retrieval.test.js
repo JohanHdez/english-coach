@@ -61,3 +61,62 @@ test('the boundary case falls to new — the costs are asymmetric', () => {
   assert.equal(route(['retry', 'policy'], 0.34), 'new');
   assert.equal(route(['retry', 'policy'], 0.35), 'anchored');
 });
+
+// append to retrieval.test.js
+import { buildReplyContext } from './retrieval.js';
+
+const long = (word, n) => `${word} `.repeat(n).trim();
+
+test('the tail and the memory leave no gap between them', () => {
+  const turns = [
+    turn('me', long('alpha', 100), 1000),
+    turn('them', long('beta', 100), 2000),
+    turn('them', 'and what about the kubernetes migration', 3000),
+  ];
+  const ctx = buildReplyContext({ turns, memory: {}, tailChars: 2700, room: {} });
+  assert.ok(ctx.tail.includes('kubernetes migration'));
+});
+
+test('an anchored question gets verbatim evidence and nothing invented', () => {
+  const turns = [
+    turn('me', 'We set the kubernetes migration for the second quarter', 1000),
+    ...Array.from({ length: 30 }, (_, i) => turn(i % 2 ? 'me' : 'them', long('filler', 40), 2000 + i * 100)),
+    turn('them', 'remind me about the kubernetes migration', 9000),
+  ];
+  const ctx = buildReplyContext({ turns, memory: {}, tailChars: 800, room: {} });
+  assert.equal(ctx.mode, 'anchored');
+  assert.ok(ctx.evidence.some((t) => t.text.includes('second quarter')));
+});
+
+test('a new question gets no evidence at all', () => {
+  const turns = [
+    turn('me', 'We set the kubernetes migration for the second quarter', 1000),
+    turn('them', 'what is a promise in javascript', 2000),
+  ];
+  const ctx = buildReplyContext({ turns, memory: {}, tailChars: 200, room: {} });
+  assert.equal(ctx.mode, 'new');
+  assert.deepEqual(ctx.evidence, []);
+});
+
+test('a squeezed budget drops evidence before topics, and never the tail', () => {
+  const turns = [
+    turn('me', 'We set the kubernetes migration for the second quarter', 1000),
+    ...Array.from({ length: 30 }, (_, i) => turn(i % 2 ? 'me' : 'them', long('filler', 40), 2000 + i * 100)),
+    turn('them', 'remind me about the kubernetes migration', 9000),
+  ];
+  const memory = { topics: [{ text: 'Migration planned for Q2', quote: 'q', t: 1000 }] };
+  const ctx = buildReplyContext({ turns, memory, tailChars: 800, room: { evidence: false } });
+  assert.deepEqual(ctx.evidence, []);
+  assert.equal(ctx.situation.length, 1);
+  assert.ok(ctx.tail.length > 0);
+});
+
+test('evidence never repeats what the tail already carries', () => {
+  const turns = [
+    turn('them', 'tell me about the kubernetes migration', 1000),
+    turn('me', 'the kubernetes migration is in Q2', 2000),
+    turn('them', 'and the kubernetes migration budget', 3000),
+  ];
+  const ctx = buildReplyContext({ turns, memory: {}, tailChars: 5000, room: {} });
+  assert.deepEqual(ctx.evidence, []);
+});

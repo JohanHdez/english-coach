@@ -2,7 +2,7 @@
 // inventing anything: what it returns is what was actually said. Pure — it runs
 // unmodified in Node.
 
-import { normalizeText } from './memory.js';
+import { normalizeText, linesOf } from './memory.js';
 
 export const MIN_CONTENT_TERMS = 2;
 export const SCORE_FLOOR = 0.35;
@@ -66,4 +66,47 @@ export function route(terms, bestScore) {
   if (terms.length < MIN_CONTENT_TERMS) return 'continuation';
   if (bestScore < SCORE_FLOOR) return 'new';
   return 'anchored';
+}
+
+// append to retrieval.js
+const SITUATION_MAX = 6;
+
+// The turns the raw tail already carries, so evidence never pays twice for them.
+function splitTail(sorted, tailChars) {
+  const kept = [];
+  let total = 0;
+  for (let i = sorted.length - 1; i >= 0; i--) {
+    total += sorted[i].text.length + 1;
+    if (total > tailChars && kept.length) break;
+    kept.unshift(sorted[i]);
+  }
+  const from = kept.length ? kept[0].t : Infinity;
+  return { tailTurns: kept, older: sorted.filter((t) => t.t < from) };
+}
+
+export function buildReplyContext({ turns, memory = {}, tailChars, room = {} }) {
+  const sorted = [...turns].sort((a, b) => a.t - b.t);
+  const { tailTurns, older } = splitTail(sorted, tailChars);
+  const index = buildIndex(sorted);
+  const query = queryFrom(sorted);
+  const { terms, scored } = scoreTurns(older, query, index);
+  const mode = route(terms, scored[0]?.score ?? 0);
+
+  const evidence = mode === 'anchored' && room.evidence !== false
+    ? scored.filter((s) => s.score >= SCORE_FLOOR).slice(0, EVIDENCE_TURNS).map((s) => s.turn)
+    : [];
+
+  const topics = Array.isArray(memory.topics) ? memory.topics : [];
+  let situation = [];
+  if (room.situation !== false && topics.length) {
+    const ranked = scoreTurns(topics.map((x) => ({ ...x, text: x.text })), query, index).scored;
+    const relevant = ranked.filter((s) => s.score >= SCORE_FLOOR).slice(0, 3).map((s) => s.turn);
+    const recent = topics.slice(-3);
+    const seen = new Set();
+    situation = [...relevant, ...recent]
+      .filter((x) => !seen.has(x.text) && seen.add(x.text))
+      .slice(0, SITUATION_MAX);
+  }
+
+  return { mode, situation, evidence, tail: linesOf(tailTurns) };
 }
