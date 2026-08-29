@@ -3,7 +3,9 @@
 
 import { Segmenter, floatToWav, isJunk, foldIntoTranscript, SR } from './segmenter.js';
 import { openCaptureStream } from './capture.js';
-import { askHints, askStarter, askReply, askReport, groqBaseOf, redact, resolveProvider, PROVIDERS, DEFAULT_COACH } from './coach.js';
+import { askHints, askStarter, askReply, askReport, askDistill, tpmOf, groqBaseOf, redact, resolveProvider, PROVIDERS, DEFAULT_COACH } from './coach.js';
+import { sizing, emptyMemory, reconcile, selectChunk, acceptItems, acceptErrors, mergeTopics, Ledger, CAPS, DISTILL_COOLDOWN_MS } from './memory.js';
+import { buildReplyContext } from './retrieval.js';
 import { startLive, liveAvailability } from './live.js';
 
 const HINT_DEBOUNCE_MS = 1200;   // wait in case the other speaker keeps talking
@@ -41,6 +43,10 @@ const state = {
   replyBusy: false,
   live: null,
   liveTrack: null,
+  memory: null,
+  ledger: new Ledger(() => Date.now()),
+  distillBusy: false,
+  lastDistillAt: 0,
 };
 
 // ---------------------------------------------------------------- utilities
@@ -81,6 +87,7 @@ async function appendTranscript(entry) {
   await store.set({ transcript });
   broadcast({ type: 'SEGMENT', entry: shown });
   if (entry.speaker === 'them') { clearPartial(); scheduleHints(); }
+  distill().catch(() => {});
 }
 
 // Two provisional layers can feed the same line — Web Speech word by word, or a
@@ -99,6 +106,70 @@ function coachSettings() {
 
 const sortedTurns = () => [...state.turns].sort((a, b) => a.t - b.t);
 
+async function loadMemory() {
+  const { memory } = (await store.get('memory')) || {};
+  state.memory = reconcile(memory || emptyMemory(state.memory?.sessionId || null), state.turns);
+  return state.memory;
+}
+
+const saveMemory = () => store.set({ memory: state.memory });
+
+// Background work, so it yields to everything the learner can see: an in-flight
+// reply on every provider, a busy transcription queue, and — only where a
+// per-minute budget exists — a hints round.
+function distillEligible(settings) {
+  if (state.distillBusy || state.replyBusy) return false;
+  if (!queueIdle()) return false;
+  if (tpmOf(settings) && state.hintBusy) return false;
+  if (Date.now() - state.lastDistillAt < DISTILL_COOLDOWN_MS) return false;
+  return state.ledger.room(tpmOf(settings), 'distill');
+}
+
+async function distill({ force = false } = {}) {
+  const settings = await ensureSettings();
+  const memory = await loadMemory();
+  const { chunkChars } = sizing(tpmOf(settings));
+  const chunk = selectChunk(state.turns, memory, chunkChars, { all: force });
+  if (!chunk) return false;
+  if (!force && !distillEligible(settings)) {
+    memory.skipped++;
+    await saveMemory();
+    return false;
+  }
+
+  state.distillBusy = true;
+  try {
+    state.ledger.spend('distill');
+    const raw = await askDistill({ chunk: { ...chunk, carry: memory.carry }, settings });
+
+    const anchor = [...chunk.overlapTurns, ...chunk.turns];
+    const topics = acceptItems(raw.topics, anchor);
+    const open = acceptItems(raw.open, anchor);
+    const errors = acceptErrors(raw.errors, chunk.turns);
+    memory.rejected += (raw.topics.length - topics.length)
+      + (raw.open.length - open.length)
+      + (raw.errors.length - errors.length);
+
+    memory.topics = mergeTopics(memory.topics, topics, CAPS.topics);
+    memory.open = mergeTopics(memory.open, open, CAPS.open);
+    memory.errors = [...memory.errors, ...errors].slice(-CAPS.errors);
+    memory.carry = raw.carry;
+    memory.coveredUntil = chunk.endsAt;
+    memory.rounds++;
+    state.lastDistillAt = Date.now();
+    await saveMemory();
+    return true;
+  } catch {
+    // Silent by design: a missing key or a 429 is already surfaced by the hints
+    // round, and the reply keeps working on the tail plus literal retrieval.
+    memory.skipped++;
+    await saveMemory();
+    return false;
+  } finally {
+    state.distillBusy = false;
+  }
+}
+
 function scheduleHints() {
   if (!coachSettings().liveCoach || !state.running) return;
   clearTimeout(state.hintTimer);
@@ -106,6 +177,7 @@ function scheduleHints() {
     if (state.hintBusy || Date.now() - state.lastHintAt < HINT_COOLDOWN_MS) return;
     state.hintBusy = true;
     try {
+      state.ledger.spend('hints');
       const hints = await askHints({ turns: sortedTurns(), settings: await ensureSettings() });
       state.lastHintAt = Date.now();
       broadcast({ type: 'HINTS', ...hints });
@@ -128,6 +200,7 @@ async function sendStarter() {
   if (!settings.liveCoach || !(settings.sessionContext || '').trim()) return;
   state.starterBusy = true;
   try {
+    state.ledger.spend('starter');
     const hints = await askStarter({ settings });
     if (state.running && !state.lastHintAt) broadcast({ type: 'HINTS', ...hints });
   } catch { /* the real hints round will surface a missing key or a rate limit */ }
@@ -141,7 +214,15 @@ async function suggestReply() {
   state.replyBusy = true;
   broadcast({ type: 'REPLY', pending: true });
   try {
-    const { answer, ideas } = await askReply({ turns: sortedTurns(), settings: await ensureSettings() });
+    const settings = await ensureSettings();
+    const memory = await loadMemory();
+    const { tailChars } = sizing(tpmOf(settings));
+    const room = state.ledger.room(tpmOf(settings), 'reply')
+      ? {}
+      : { evidence: false, situation: false };
+    const context = buildReplyContext({ turns: sortedTurns(), memory, tailChars, room });
+    state.ledger.spend('reply');
+    const { answer, ideas } = await askReply({ turns: sortedTurns(), settings, context });
     broadcast({ type: 'REPLY', answer, ideas });
     return { ok: true };
   } catch (e) {
@@ -174,6 +255,7 @@ async function makeReport(auto = false) {
     status('Generando informe…');
   }
   try {
+    state.ledger.spend('report');
     const markdown = await askReport({ turns: sortedTurns(), settings });
     const asText = sortedTurns()
       .map((e) => `**${e.speaker === 'me' ? 'Yo' : 'Interlocutor'}**: ${e.text}`)
@@ -396,6 +478,9 @@ async function start(streamId, settings, streamKind) {
   state.streams = [];
   const { transcript = [] } = (await store.get('transcript')) || {};
   state.turns = transcript;
+  const stored = (await store.get('memory'))?.memory;
+  state.memory = reconcile(stored || emptyMemory(String(Date.now())), state.turns);
+  if (!stored) await saveMemory();
 
   state.workCtx = new AudioContext({ sampleRate: SR });
   await state.workCtx.audioWorklet.addModule(chrome.runtime.getURL('recorder-worklet.js'));
@@ -518,11 +603,16 @@ async function stop() {
   if (coachSettings().autoReport) {
     (async () => {
       await waitForQueue();
+      await distill({ force: true }).catch(() => {});
       status('Detenido.', 'info');
       makeReport(true);
     })();
   } else {
-    waitForQueue().then(() => status('Detenido.', 'info'));
+    (async () => {
+      await waitForQueue();
+      await distill({ force: true }).catch(() => {});
+      status('Detenido.', 'info');
+    })();
   }
   return { ok: true };
 }
