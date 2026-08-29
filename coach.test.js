@@ -117,7 +117,6 @@ test('parseDistill throws on unusable output rather than returning a shell', () 
   assert.throws(() => parseDistill('the model said hello'));
 });
 
-// append to coach.test.js
 import { contextBlocks } from './coach.js';
 
 test('an anchored context prints the literal record', () => {

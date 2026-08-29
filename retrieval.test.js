@@ -62,7 +62,6 @@ test('the boundary case falls to new — the costs are asymmetric', () => {
   assert.equal(route(['retry', 'policy'], 0.35), 'anchored');
 });
 
-// append to retrieval.test.js
 import { buildReplyContext } from './retrieval.js';
 
 const long = (word, n) => `${word} `.repeat(n).trim();

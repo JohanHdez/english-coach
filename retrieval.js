@@ -68,7 +68,6 @@ export function route(terms, bestScore) {
   return 'anchored';
 }
 
-// append to retrieval.js
 const SITUATION_MAX = 6;
 
 // The turns the raw tail already carries, so evidence never pays twice for them.
