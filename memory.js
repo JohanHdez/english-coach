@@ -191,3 +191,50 @@ export class Ledger {
     return this.spent() + (NOMINAL_COST[kind] || 0) <= tpm * BUDGET_SAFETY;
   }
 }
+
+export const emptyLake = () => ({ entries: [], vetoed: [] });
+
+export const lakeKey = (wrong, right) => `${normalizeText(wrong)}→${normalizeText(right)}`;
+
+// `count` is sessions, not repetitions: saying the same thing four times in one
+// meeting is one occurrence. It is what makes recurrence a signal about the
+// learner rather than about how talkative they were that afternoon.
+export function mergeLake(lake, errors, sessionId, now) {
+  const entries = lake.entries.map((e) => ({ ...e, samples: [...e.samples] }));
+  const vetoed = new Set(lake.vetoed);
+  const index = new Map(entries.map((e) => [e.key, e]));
+
+  for (const e of errors) {
+    const key = lakeKey(e.wrong, e.right);
+    if (vetoed.has(key)) continue;
+    let entry = index.get(key);
+    if (!entry) {
+      entry = { key, wrong: e.wrong, right: e.right, kind: e.kind, count: 0, lastSessionId: null, firstAt: now, lastAt: now, samples: [] };
+      entries.push(entry);
+      index.set(key, entry);
+    }
+    if (entry.lastSessionId !== sessionId) {
+      entry.count++;
+      entry.lastSessionId = sessionId;
+    }
+    entry.lastAt = now;
+    if (e.said && !entry.samples.includes(e.said)) {
+      entry.samples = [...entry.samples, e.said].slice(-CAPS.samples);
+    }
+  }
+
+  entries.sort((a, b) => (a.count - b.count) || (a.lastAt - b.lastAt));
+  return { entries: entries.slice(-CAPS.lakeEntries), vetoed: [...vetoed].slice(-CAPS.vetoed) };
+}
+
+// A plain delete would let the distiller re-extract the same ASR garbage next
+// week, and the button would feel broken. The pair is banned, not removed.
+export function vetoKey(lake, key) {
+  return {
+    entries: lake.entries.filter((e) => e.key !== key),
+    vetoed: [...new Set([...lake.vetoed, key])].slice(-CAPS.vetoed),
+  };
+}
+
+export const confirmedEntries = (lake) =>
+  lake.entries.filter((e) => e.count >= RECURRENCE_MIN).sort((a, b) => b.count - a.count);

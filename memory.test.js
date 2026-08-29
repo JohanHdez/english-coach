@@ -216,3 +216,56 @@ test('the ledger always has room on an unmetered provider', () => {
   for (let i = 0; i < 20; i++) ledger.spend('report');
   assert.equal(ledger.room(null, 'distill'), true);
 });
+
+import { emptyLake, lakeKey, mergeLake, vetoKey, confirmedEntries } from './memory.js';
+
+const err = (wrong, right) => ({ wrong, right, kind: 'grammar', said: `I ${wrong} it`, t: 1 });
+
+test('the lake key is the minimal pair, not the sentence', () => {
+  assert.equal(lakeKey('Depends  OF!', 'depends on'), 'depends of→depends on');
+});
+
+test('four repetitions inside one session count as one occurrence', () => {
+  const lake = mergeLake(emptyLake(), [err('depends of', 'depends on'), err('depends of', 'depends on')], 's1', 1000);
+  assert.equal(lake.entries.length, 1);
+  assert.equal(lake.entries[0].count, 1);
+});
+
+test('a second session promotes the entry to confirmed', () => {
+  let lake = mergeLake(emptyLake(), [err('depends of', 'depends on')], 's1', 1000);
+  assert.deepEqual(confirmedEntries(lake), []);
+  lake = mergeLake(lake, [err('depends of', 'depends on')], 's2', 2000);
+  assert.equal(lake.entries[0].count, 2);
+  assert.equal(confirmedEntries(lake).length, 1);
+});
+
+test('merging the same session twice does not double-count', () => {
+  let lake = mergeLake(emptyLake(), [err('depends of', 'depends on')], 's1', 1000);
+  lake = mergeLake(lake, [err('depends of', 'depends on')], 's1', 1500);
+  assert.equal(lake.entries[0].count, 1);
+});
+
+test('a vetoed pair never comes back, however often it is extracted', () => {
+  let lake = mergeLake(emptyLake(), [err('request quid', 'request queued')], 's1', 1000);
+  lake = vetoKey(lake, lake.entries[0].key);
+  assert.equal(lake.entries.length, 0);
+  lake = mergeLake(lake, [err('request quid', 'request queued')], 's2', 2000);
+  assert.equal(lake.entries.length, 0);
+});
+
+test('the lake keeps at most three evidence sentences per entry', () => {
+  let lake = emptyLake();
+  for (let i = 0; i < 5; i++) {
+    lake = mergeLake(lake, [{ ...err('depends of', 'depends on'), said: `sentence ${i}` }], `s${i}`, i * 1000);
+  }
+  assert.equal(lake.entries[0].samples.length, 3);
+  assert.equal(lake.entries[0].count, 5);
+});
+
+test('the lake stays capped and a recurrent mistake outlives a flood of one-offs', () => {
+  let lake = emptyLake();
+  for (const s of ['s1', 's2', 's3']) lake = mergeLake(lake, [err('depends of', 'depends on')], s, 1000);
+  for (let i = 0; i < 205; i++) lake = mergeLake(lake, [err(`wrong ${i}`, `right ${i}`)], `f${i}`, 2000 + i);
+  assert.equal(lake.entries.length, 200);
+  assert.ok(lake.entries.some((e) => e.key === lakeKey('depends of', 'depends on')));
+});
