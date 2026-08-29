@@ -227,6 +227,11 @@ $('save').addEventListener('click', async () => {
   setTimeout(() => ($('saved').textContent = ''), 2500);
 });
 
+$('clearLake').addEventListener('click', async () => {
+  await chrome.storage.local.remove('lake');
+  $('clearLake').textContent = 'Histórico borrado ✓';
+});
+
 (async function init() {
   const { settings = {} } = await chrome.storage.local.get('settings');
   const s = { ...DEFAULTS, ...settings };
