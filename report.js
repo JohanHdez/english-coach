@@ -1,5 +1,7 @@
 // Renders the report (Markdown produced by the LLM), always escaping the content.
 
+import { confirmedEntries, vetoKey, emptyLake } from './memory.js';
+
 const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
 function inline(s) {
@@ -71,6 +73,11 @@ export function renderMarkdown(md) {
 }
 
 async function main() {
+  await renderReport();
+  await renderLake();
+}
+
+async function renderReport() {
   const { report } = await chrome.storage.local.get('report');
   const md = document.getElementById('md');
   if (!report) {
@@ -102,6 +109,42 @@ async function main() {
     a.click();
     setTimeout(() => URL.revokeObjectURL(url), 4000);
   });
+}
+
+async function renderLake() {
+  const { lake } = await chrome.storage.local.get('lake');
+  const entries = confirmedEntries(lake || emptyLake());
+  const section = document.getElementById('lake');
+  const list = document.getElementById('lakeList');
+  section.hidden = entries.length === 0;
+  list.textContent = '';
+
+  for (const entry of entries) {
+    const li = document.createElement('li');
+
+    const pair = document.createElement('p');
+    const wrong = document.createElement('s');
+    wrong.textContent = entry.wrong;
+    const right = document.createElement('strong');
+    right.textContent = entry.right;
+    pair.append(wrong, ' → ', right, ` · ${entry.count} conversaciones`);
+
+    const sample = document.createElement('p');
+    sample.className = 'hint';
+    sample.textContent = entry.samples[entry.samples.length - 1] || '';
+
+    // A plain delete would let the same ASR garbage come back next week.
+    const veto = document.createElement('button');
+    veto.textContent = 'Esto no era un error';
+    veto.addEventListener('click', async () => {
+      const { lake: current } = await chrome.storage.local.get('lake');
+      await chrome.storage.local.set({ lake: vetoKey(current || emptyLake(), entry.key) });
+      await renderLake();
+    });
+
+    li.append(pair, sample, veto);
+    list.append(li);
+  }
 }
 
 if (typeof document !== 'undefined' && document.getElementById('md')) main();
