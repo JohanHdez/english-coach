@@ -635,11 +635,8 @@ transcripción.
 
 ## Fórmulas profesionales para aprender
 4 o 5 fórmulas que encajaban en esta conversación (para estructurar una respuesta, ganar unos
-segundos, cerrar un punto), cada una con el momento real donde encajaba.
-
-## Lo que tienes que aprender
-Las 5 frases o palabras que más te conviene memorizar a partir de tus propios errores de hoy.
-Cada una con el inglés en negrita, una glosa corta en español y la frase real donde falló.
+segundos, cerrar un punto), cada una con el momento real donde encajaba. Empieza por las que
+corrigen los ERRORES DETECTADOS que se te entregan, si los hay.
 
 ## Plan
 Tres ejercicios concretos para esta semana y un consejo profesional de coach: qué hacer distinto

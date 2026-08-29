@@ -165,5 +165,5 @@ Skills: `/preflight`, `/add-provider`, `/release`.
   is still requested. Preflight reports both.
 - `host_permissions` covers every site; only `huggingface.co`, `api.groq.com` and
   `api.anthropic.com` are actually fetched.
-- `coach.js` is past 500 lines and now holds four prompt families; the distiller and the report
-  are candidates for their own module if it grows again.
+- `coach.js` is past 600 lines and holds five prompt families (chips, starter, distiller, reply,
+  report); the distiller and the report are candidates for their own module if it grows again.
