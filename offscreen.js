@@ -45,8 +45,9 @@ const state = {
   liveTrack: null,
   memory: null,
   ledger: new Ledger(() => Date.now()),
-  distillBusy: false,
+  distillBusy: null,
   lastDistillAt: 0,
+  lastSkippedAt: 0,
 };
 
 // ---------------------------------------------------------------- utilities
@@ -112,7 +113,10 @@ async function loadMemory() {
   return state.memory;
 }
 
-const saveMemory = () => store.set({ memory: state.memory });
+// Takes the object to persist rather than reading `state.memory`. Two rounds each
+// hold their own copy, and a save that reads shared state would write whichever
+// copy loaded last — silently discarding the round that is actually finishing.
+const saveMemory = (memory) => { state.memory = memory; return store.set({ memory }); };
 
 // Background work, so it yields to everything the learner can see: an in-flight
 // reply on every provider, a busy transcription queue, and — only where a
@@ -126,18 +130,32 @@ function distillEligible(settings) {
 }
 
 async function distill({ force = false } = {}) {
+  // Checked before the first await, so a segment arriving mid-round cannot load a
+  // second copy of the memory. The forced flush waits its turn instead of bailing:
+  // it is the last chance to distil before the report.
+  if (state.distillBusy) {
+    if (!force) return false;
+    await state.distillBusy.catch(() => {});
+  }
+
   const settings = await ensureSettings();
   const memory = await loadMemory();
   const { chunkChars } = sizing(tpmOf(settings));
   const chunk = selectChunk(state.turns, memory, chunkChars, { all: force });
   if (!chunk) return false;
   if (!force && !distillEligible(settings)) {
-    memory.skipped++;
-    await saveMemory();
+    // One skipped round, not one per segment that arrives while it stays skipped:
+    // `skipped` divides into the coverage figure the report states out loud.
+    if (state.lastSkippedAt !== chunk.endsAt) {
+      state.lastSkippedAt = chunk.endsAt;
+      memory.skipped++;
+      await saveMemory(memory);
+    }
     return false;
   }
 
-  state.distillBusy = true;
+  let release;
+  state.distillBusy = new Promise((r) => { release = r; });
   try {
     state.ledger.spend('distill');
     const raw = await askDistill({ chunk: { ...chunk, carry: memory.carry }, settings });
@@ -157,16 +175,17 @@ async function distill({ force = false } = {}) {
     memory.coveredUntil = chunk.endsAt;
     memory.rounds++;
     state.lastDistillAt = Date.now();
-    await saveMemory();
+    await saveMemory(memory);
     return true;
   } catch {
     // Silent by design: a missing key or a 429 is already surfaced by the hints
     // round, and the reply keeps working on the tail plus literal retrieval.
     memory.skipped++;
-    await saveMemory();
+    await saveMemory(memory);
     return false;
   } finally {
-    state.distillBusy = false;
+    state.distillBusy = null;
+    release();
   }
 }
 
@@ -480,7 +499,7 @@ async function start(streamId, settings, streamKind) {
   state.turns = transcript;
   const stored = (await store.get('memory'))?.memory;
   state.memory = reconcile(stored || emptyMemory(String(Date.now())), state.turns);
-  if (!stored) await saveMemory();
+  if (!stored) await saveMemory(state.memory);
 
   state.workCtx = new AudioContext({ sampleRate: SR });
   await state.workCtx.audioWorklet.addModule(chrome.runtime.getURL('recorder-worklet.js'));
