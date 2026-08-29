@@ -58,3 +58,12 @@ export function scoreTurns(corpus, query, index) {
   scored.sort((a, b) => b.score - a.score);
   return { terms, scored };
 }
+
+// Three cases, not two. Demoting an anchored question to "new" costs a slightly
+// generic answer; promoting a new one to "anchored" makes the learner claim out
+// loud that something was discussed when it was not. On doubt, "new".
+export function route(terms, bestScore) {
+  if (terms.length < MIN_CONTENT_TERMS) return 'continuation';
+  if (bestScore < SCORE_FLOOR) return 'new';
+  return 'anchored';
+}

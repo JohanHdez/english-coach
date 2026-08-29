@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { tokenize, buildIndex, queryFrom, scoreTurns } from './retrieval.js';
+import { route } from './retrieval.js';
 
 const turn = (speaker, text, t) => ({ speaker, text, t, dur: 1 });
 
@@ -41,4 +42,22 @@ test('scoreTurns ranks the turn that shares the rare terms', () => {
   const { scored } = scoreTurns(corpus, 'what was the retry policy', index);
   assert.equal(scored[0].turn.t, 2);
   assert.ok(scored[0].score > scored[1].score);
+});
+
+test('a pronominal follow-up is a continuation, never a new topic', () => {
+  assert.equal(route(tokenize('And how would you do that?'), 0), 'continuation');
+  assert.equal(route(tokenize('¿Y eso por qué?'), 0), 'continuation');
+});
+
+test('content terms that match earlier turns are anchored', () => {
+  assert.equal(route(['retry', 'policy'], 0.8), 'anchored');
+});
+
+test('content terms with no match are a new topic', () => {
+  assert.equal(route(['promise', 'javascript'], 0.1), 'new');
+});
+
+test('the boundary case falls to new — the costs are asymmetric', () => {
+  assert.equal(route(['retry', 'policy'], 0.34), 'new');
+  assert.equal(route(['retry', 'policy'], 0.35), 'anchored');
 });
