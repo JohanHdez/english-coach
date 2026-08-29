@@ -1613,12 +1613,24 @@ importancia; puedes añadir como máximo dos más que encuentres en la transcrip
 Si se te indica una COBERTURA por debajo del 100%, dilo en una línea al final del resumen.
 ```
 
-Add a new section to both prompts, before `## Nivel y plan` / `## Plan`:
+Add a new section to **`REPORT_SYSTEM` only**, before `## Nivel y plan`:
 
 ```
 ## Lo que tienes que aprender
 Las 5 frases o palabras que más te conviene memorizar a partir de tus propios errores de hoy.
 Cada una con el inglés en negrita, una glosa corta en español y la frase real donde falló.
+```
+
+`REPORT_SYSTEM_ES` does **not** get that section. It reports on a conversation held in Spanish,
+where the learner is a native speaker — an English-bolding section would be reporting on a
+language that was never spoken, and it would duplicate the `## Fórmulas profesionales para
+aprender` section that prompt already has. Instead, extend that existing section so it draws on
+the recorded errors, replacing its body with:
+
+```
+4 o 5 fórmulas que encajaban en esta conversación (para estructurar una respuesta, ganar unos
+segundos, cerrar un punto), cada una con el momento real donde encajaba. Empieza por las que
+corrigen los ERRORES DETECTADOS que se te entregan, si los hay.
 ```
 
 Then in `askReport`:
@@ -1697,8 +1709,8 @@ Replace the module list with:
 Replace `- No unit tests exist yet, despite four modules being written to be testable.` with:
 
 ```
-- `coach.js` is past 500 lines and now holds four prompt families; the distiller and the report
-  are candidates for their own module if it grows again.
+- `coach.js` is past 600 lines and holds five prompt families (chips, starter, distiller, reply,
+  report); the distiller and the report are candidates for their own module if it grows again.
 ```
 
 - [ ] **Step 4: Verify and commit**
