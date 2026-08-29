@@ -30,6 +30,9 @@
   - `WRONG_MAX_CHARS = 60`, `MIN_QUOTE_CHARS = 12`
   - `MIN_CONTENT_TERMS = 2`, `SCORE_FLOOR = 0.35`, `EVIDENCE_TURNS = 3`, `QUERY_MAX_CHARS = 400`
   - `RECURRENCE_MIN = 2`
+- **Code blocks in this document show additions to the file named in that task's **Files:** block.**
+  Append them there. Never copy an instructional comment from this plan into the code — the plan's
+  stage directions are not part of the deliverable.
 - Verification gate after every task:
   ```bash
   node .claude/skills/preflight/scripts/preflight.mjs
@@ -198,7 +201,6 @@ git commit -m "feat(memory): session memory state, provider sizing and reconcili
 - [ ] **Step 1: Write the failing test**
 
 ```js
-// append to memory.test.js
 import { selectChunk, linesOf } from './memory.js';
 
 const turn = (speaker, text, t, dur = 1) => ({ speaker, text, t, dur });
@@ -290,7 +292,6 @@ Expected: FAIL — `selectChunk is not a function`
 - [ ] **Step 3: Write the minimal implementation**
 
 ```js
-// append to memory.js
 export const linesOf = (turns) =>
   turns.map((t) => `${t.speaker === 'me' ? 'LEARNER' : 'OTHER'}: ${t.text}`).join('\n');
 
@@ -383,7 +384,6 @@ Nothing verifiable in JS is asked of the model. `said` and every `t` are derived
 - [ ] **Step 1: Write the failing test**
 
 ```js
-// append to memory.test.js
 import { normalizeText, acceptItems, acceptErrors, mergeTopics } from './memory.js';
 
 test('normalizeText folds case, punctuation and whitespace', () => {
@@ -465,7 +465,6 @@ Expected: FAIL — `normalizeText is not a function`
 - [ ] **Step 3: Write the minimal implementation**
 
 ```js
-// append to memory.js
 const KINDS = new Set(['grammar', 'calque', 'register']);
 
 // Accents are folded too. It makes the Spanish stopword list plain ASCII, and it
@@ -561,7 +560,6 @@ Costs are nominal estimates, not accounting. The point is the safety margin, not
 - [ ] **Step 1: Write the failing test**
 
 ```js
-// append to memory.test.js
 import { Ledger } from './memory.js';
 
 test('the ledger only counts the last minute', () => {
@@ -597,7 +595,6 @@ Expected: FAIL — `Ledger is not a constructor`
 - [ ] **Step 3: Write the minimal implementation**
 
 ```js
-// append to memory.js
 // A rolling estimate of what the current minute has already cost, so a background
 // round never spends the budget a user-requested reply is about to need. The
 // figures are nominal: the margin is the mechanism, not the arithmetic.
@@ -653,7 +650,6 @@ git commit -m "feat(memory): rolling token ledger so background work yields to t
 - [ ] **Step 1: Write the failing test**
 
 ```js
-// append to coach.test.js
 import { parseDistill, tpmOf, PROVIDERS } from './coach.js';
 
 test('every provider declares a per-minute budget', () => {
@@ -999,7 +995,6 @@ A question with almost no content words is the *most* anchored one there is — 
 - [ ] **Step 1: Write the failing test**
 
 ```js
-// append to retrieval.test.js
 import { route } from './retrieval.js';
 
 test('a pronominal follow-up is a continuation, never a new topic', () => {
@@ -1029,7 +1024,6 @@ Expected: FAIL — `route is not a function`
 - [ ] **Step 3: Write the minimal implementation**
 
 ```js
-// append to retrieval.js
 // Three cases, not two. Demoting an anchored question to "new" costs a slightly
 // generic answer; promoting a new one to "anchored" makes the learner claim out
 // loud that something was discussed when it was not. On doubt, "new".
@@ -1069,7 +1063,6 @@ git commit -m "feat(retrieval): three-way routing between continuation, anchored
 - [ ] **Step 1: Write the failing test**
 
 ```js
-// append to retrieval.test.js
 import { buildReplyContext } from './retrieval.js';
 
 const long = (word, n) => `${word} `.repeat(n).trim();
@@ -1145,7 +1138,6 @@ import { normalizeText, linesOf } from './memory.js';
 Then append:
 
 ```js
-// append to retrieval.js
 const SITUATION_MAX = 6;
 
 // The turns the raw tail already carries, so evidence never pays twice for them.
@@ -1218,7 +1210,6 @@ An **absent** block is ambiguous to a model and invites filling. A **declared** 
 - [ ] **Step 1: Write the failing test**
 
 ```js
-// append to coach.test.js
 import { contextBlocks } from './coach.js';
 
 test('an anchored context prints the literal record', () => {
@@ -1531,7 +1522,6 @@ Today the report trims to 12000 characters and only whispers `(sólo la parte fi
 - [ ] **Step 1: Write the failing test**
 
 ```js
-// append to coach.test.js
 import { memoryBlock, coverageOf } from './coach.js';
 
 test('coverageOf reports the share of rounds that actually ran', () => {
@@ -1717,7 +1707,6 @@ Recurrence is the noise filter, and it is model-agnostic: a hallucination is ran
 - [ ] **Step 1: Write the failing test**
 
 ```js
-// append to memory.test.js
 import { emptyLake, lakeKey, mergeLake, vetoKey, confirmedEntries } from './memory.js';
 
 const err = (wrong, right) => ({ wrong, right, kind: 'grammar', said: `I ${wrong} it`, t: 1 });
@@ -1780,7 +1769,6 @@ Expected: FAIL — `emptyLake is not a function`
 - [ ] **Step 3: Write the minimal implementation**
 
 ```js
-// append to memory.js
 export const emptyLake = () => ({ entries: [], vetoed: [] });
 
 export const lakeKey = (wrong, right) => `${normalizeText(wrong)}→${normalizeText(right)}`;
@@ -2057,7 +2045,6 @@ git commit -m "feat(setup): let the learner empty the error history"
 - [ ] **Step 1: Write the failing test**
 
 ```js
-// append to coach.test.js
 test('memoryBlock separates today from what the learner repeats', () => {
   const out = memoryBlock(
     { rounds: 1, skipped: 0, topics: [], open: [], errors: [] },
