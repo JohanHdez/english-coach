@@ -84,6 +84,11 @@ Chrome reports with an unrelated error message.
    share, which is why `overlay.js` resolves duplicates by stamping `data-version` on the host
    and letting the newest copy evict the rest. Duplicated folders are also the usual cause of
    `ERR_BLOCKED_BY_CLIENT`. Never assume one copy is installed.
+10. **A turn can still grow after it is stored.** `foldIntoTranscript` extends the entry with the
+    highest `t` when the same speaker continues within `MERGE_GAP_MS`. Anything that consumes
+    turns as final — the distiller above all — must exclude that entry, which is why
+    `selectChunk` never includes it. Distilling it loses the appended text silently: no error,
+    no warning, just a hole in the memory.
 
 ## Message protocol
 
@@ -109,10 +114,11 @@ security control, not formatting.
 **Errors.** Prefix user-visible failures with the stage that produced them: `[offscreen]`,
 `[captura]`, `[tabs.query]`. Chrome's own messages ("Invalid state") identify nothing.
 
-**Pure logic stays pure.** `segmenter.js`, `capture.js`, `coach.js` and `report.js` import no
-`chrome.*` and take their side effects as injected parameters (`Segmenter(…, now)`,
-`openCaptureStream(…, gum)`). That is deliberate: they import and run unmodified in Node, which
-is the only way any of this is testable. Keep new logic on that side of the line.
+**Pure logic stays pure.** `segmenter.js`, `capture.js`, `coach.js`, `memory.js`, `retrieval.js` and
+`report.js` import no `chrome.*` and take their side effects as injected parameters
+(`Segmenter(…, now)`, `openCaptureStream(…, gum)`, `new Ledger(now)`). That is deliberate: they
+import and run unmodified in Node, which is the only way any of this is testable. Keep new logic
+on that side of the line.
 
 **Secrets.** API keys live in `chrome.storage.local` and nowhere else. Never log them, never put
 one in a URL or a query string, never send one to a host the user did not configure.
@@ -159,4 +165,5 @@ Skills: `/preflight`, `/add-provider`, `/release`.
   is still requested. Preflight reports both.
 - `host_permissions` covers every site; only `huggingface.co`, `api.groq.com` and
   `api.anthropic.com` are actually fetched.
-- No unit tests exist yet, despite four modules being written to be testable.
+- `coach.js` is past 500 lines and now holds four prompt families; the distiller and the report
+  are candidates for their own module if it grows again.
