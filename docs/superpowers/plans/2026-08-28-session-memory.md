@@ -2165,15 +2165,17 @@ git commit -m "feat(report): open the learning section with what the learner rep
 
 - [ ] **Step 1: Add the lake to `PRIVACY.md`**
 
-In the section describing what is stored locally:
+In the section describing what is stored locally. `PRIVACY.md` is repository documentation and is
+written in English throughout; it quotes Spanish UI labels in guillemets but never writes whole
+paragraphs in Spanish.
 
 ```
-**Histórico de errores.** La extensión guarda en `chrome.storage.local` los errores de inglés
-detectados en tus conversaciones: la expresión incorrecta, su corrección y hasta tres frases
-tuyas como evidencia. A diferencia de la transcripción, **este histórico sobrevive a las
-sesiones**, porque su valor es detectar lo que repites. Nunca sale de tu equipo y nunca se envía
-a ningún proveedor salvo como parte del informe que tú pides. Puedes borrar una entrada desde el
-informe («Esto no era un error») o vaciarlo entero desde Ajustes.
+**Error history.** The extension stores the English mistakes it detects in your conversations in
+`chrome.storage.local`: the wrong expression, its correction, and up to three of your own
+sentences as evidence. Unlike the transcript, **this history survives across sessions** —
+spotting what you repeat is the whole point of it. It never leaves your machine, and it is never
+sent to any provider except as part of a report you asked for. You can delete a single entry from
+the report («Esto no era un error») or empty the history entirely from Settings.
 ```
 
 - [ ] **Step 2: Add the storage keys to `CLAUDE.md`**
