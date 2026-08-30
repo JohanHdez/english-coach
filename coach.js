@@ -463,9 +463,9 @@ their biography — employers, job titles, numbers or achievements not stated in
 the learner has to say this out loud as the truth. If the background does not cover a personal
 question, stay honest and general rather than fabricating detail.
 
-Facts about THIS conversation may come only from the LITERAL RECORD block. The SITUATION block
-orients you and is not quotable as fact. Never say or imply that something was discussed unless
-it appears in the LITERAL RECORD.`;
+Facts about THIS conversation may come only from the LITERAL RECORD and RECENT blocks. The
+SITUATION block orients you and is not quotable as fact. Never say or imply that something was
+discussed unless it appears in one of those two blocks.`;
 
 const REPLY_ITEMS = {
   type: 'array',

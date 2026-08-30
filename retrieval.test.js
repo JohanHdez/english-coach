@@ -62,6 +62,14 @@ test('the boundary case falls to new — the costs are asymmetric', () => {
   assert.equal(route(['retry', 'policy'], 0.35), 'anchored');
 });
 
+test('with no past to be absent from, content terms never route to new', () => {
+  assert.equal(route(['promise', 'javascript'], 0, false), 'continuation');
+});
+
+test('hasPast defaults to true, so every existing caller keeps its behaviour', () => {
+  assert.equal(route(['promise', 'javascript'], 0.1), 'new');
+});
+
 import { buildReplyContext } from './retrieval.js';
 
 const long = (word, n) => `${word} `.repeat(n).trim();
@@ -87,12 +95,29 @@ test('an anchored question gets verbatim evidence and nothing invented', () => {
   assert.ok(ctx.evidence.some((t) => t.text.includes('second quarter')));
 });
 
-test('a new question gets no evidence at all', () => {
+// The whole (short) conversation fits in the tail, so `older` is empty and there
+// is nothing for the question to be absent from. Declaring "new" here would tell
+// the model NOTHING covers this question directly above a RECENT block holding
+// the entire conversation — worse than saying nothing at all.
+test('a conversation short enough that older is empty is a continuation, never a declared absence', () => {
   const turns = [
     turn('me', 'We set the kubernetes migration for the second quarter', 1000),
     turn('them', 'what is a promise in javascript', 2000),
   ];
   const ctx = buildReplyContext({ turns, memory: {}, tailChars: 200, room: {} });
+  assert.equal(ctx.mode, 'continuation');
+  assert.deepEqual(ctx.evidence, []);
+});
+
+// Same unrelated question, but the transcript is long enough that some turns
+// fall outside the tail: `older` is non-empty, so "new" is still reachable.
+test('once the transcript has a past, an unrelated question still routes to new', () => {
+  const turns = [
+    turn('me', 'We set the kubernetes migration for the second quarter', 1000),
+    ...Array.from({ length: 30 }, (_, i) => turn(i % 2 ? 'me' : 'them', long('filler', 40), 2000 + i * 100)),
+    turn('them', 'what is a promise in javascript', 9000),
+  ];
+  const ctx = buildReplyContext({ turns, memory: {}, tailChars: 800, room: {} });
   assert.equal(ctx.mode, 'new');
   assert.deepEqual(ctx.evidence, []);
 });

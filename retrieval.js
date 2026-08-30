@@ -62,8 +62,12 @@ export function scoreTurns(corpus, query, index) {
 // Three cases, not two. Demoting an anchored question to "new" costs a slightly
 // generic answer; promoting a new one to "anchored" makes the learner claim out
 // loud that something was discussed when it was not. On doubt, "new".
-export function route(terms, bestScore) {
+export function route(terms, bestScore, hasPast = true) {
   if (terms.length < MIN_CONTENT_TERMS) return 'continuation';
+  // "new" means "about something absent from what came before". With no turns
+  // outside the tail there is no before to be absent from, and declaring an
+  // absence over a conversation the model can read in full is worse than silence.
+  if (!hasPast) return 'continuation';
   if (bestScore < SCORE_FLOOR) return 'new';
   return 'anchored';
 }
@@ -89,7 +93,7 @@ export function buildReplyContext({ turns, memory = {}, tailChars, room = {} }) 
   const index = buildIndex(sorted);
   const query = queryFrom(sorted);
   const { terms, scored } = scoreTurns(older, query, index);
-  const mode = route(terms, scored[0]?.score ?? 0);
+  const mode = route(terms, scored[0]?.score ?? 0, older.length > 0);
 
   const evidence = mode === 'anchored' && room.evidence !== false
     ? scored.filter((s) => s.score >= SCORE_FLOOR).slice(0, EVIDENCE_TURNS).map((s) => s.turn)
