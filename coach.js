@@ -211,8 +211,10 @@ export const coverageOf = (m = {}) => {
 // The distilled record of the whole conversation, so the summary stops being
 // built from whatever fitted in the tail.
 export function memoryBlock(memory, recurring = []) {
-  if (!memory) return '';
-  const { topics = [], open = [], errors = [] } = memory;
+  // `recurring` is an independent input: a session with no distilled memory at all
+  // still has a history worth showing.
+  if (!memory && !recurring.length) return '';
+  const { topics = [], open = [], errors = [] } = memory || {};
   if (!topics.length && !open.length && !errors.length && !recurring.length) return '';
   const parts = [];
   if (topics.length) parts.push('TEMAS REGISTRADOS (cubren toda la conversación):\n'
