@@ -304,11 +304,18 @@ async function makeReport(auto = false) {
   try {
     state.ledger.spend('report');
     const { lake } = (await store.get('lake')) || {};
+    // confirmedEntries returns every entry with count >= 2 (the lake holds up to
+    // 200), already sorted by count descending. Uncapped, a long-term user's
+    // report prompt could carry hundreds of recurring lines on top of the
+    // transcript and the rest of the memory block — well past a rate-limited
+    // provider's per-minute budget. Cap at the call site: other callers of
+    // confirmedEntries (the report veto UI) still want the full list.
+    const recurring = confirmedEntries(lake || emptyLake()).slice(0, 8);
     const markdown = await askReport({
       turns: sortedTurns(),
       settings,
       memory: await loadMemory(),
-      recurring: confirmedEntries(lake || emptyLake()),
+      recurring,
     });
     const asText = sortedTurns()
       .map((e) => `**${e.speaker === 'me' ? 'Yo' : 'Interlocutor'}**: ${e.text}`)

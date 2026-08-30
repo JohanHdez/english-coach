@@ -200,7 +200,10 @@ export function turnsToText(turns, limit = 10, maxChars = Infinity) {
 }
 
 // Distilled topics now cover the region this used to cut silently, so the tail
-// can shrink to pay for them: coverage goes up while the token cost stays flat.
+// can shrink to make room for them: the memory block (topics, open items, errors,
+// capped recurring history) covers the whole conversation instead of just its
+// final stretch, but it is not free — the token cost does rise with usage, which
+// is why the recurring list is capped at the call site in offscreen.js.
 const REPORT_MAX_CHARS = 8000;
 
 export const coverageOf = (m) => {
