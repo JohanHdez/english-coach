@@ -4,7 +4,7 @@
 import { Segmenter, floatToWav, isJunk, foldIntoTranscript, SR } from './segmenter.js';
 import { openCaptureStream } from './capture.js';
 import { askHints, askStarter, askReply, askReport, askDistill, tpmOf, groqBaseOf, redact, resolveProvider, PROVIDERS, DEFAULT_COACH } from './coach.js';
-import { sizing, emptyMemory, reconcile, selectChunk, acceptItems, acceptErrors, mergeTopics, Ledger, CAPS, DISTILL_COOLDOWN_MS } from './memory.js';
+import { sizing, emptyMemory, reconcile, selectChunk, acceptItems, acceptErrors, mergeTopics, Ledger, CAPS, DISTILL_COOLDOWN_MS, mergeLake, emptyLake } from './memory.js';
 import { buildReplyContext } from './retrieval.js';
 import { startLive, liveAvailability } from './live.js';
 
@@ -117,6 +117,18 @@ async function loadMemory() {
 // hold their own copy, and a save that reads shared state would write whichever
 // copy loaded last — silently discarding the round that is actually finishing.
 const saveMemory = (memory) => { state.memory = memory; return store.set({ memory }); };
+
+// The session's errors reach the history once the session is over, so a mistake
+// repeated all afternoon still counts as one occurrence.
+async function mergeIntoLake() {
+  const memory = state.memory;
+  if (!memory || memory.merged || !memory.errors.length) return;
+  const { lake } = (await store.get('lake')) || {};
+  const next = mergeLake(lake || emptyLake(), memory.errors, memory.sessionId, Date.now());
+  await store.set({ lake: next });
+  memory.merged = true;
+  await saveMemory(memory);
+}
 
 // Background work, so it yields to everything the learner can see: an in-flight
 // reply on every provider, a busy transcription queue, and — only where a
@@ -504,6 +516,9 @@ async function start(streamId, settings, streamKind) {
   state.turns = transcript;
   const stored = (await store.get('memory'))?.memory;
   state.memory = reconcile(stored || emptyMemory(String(Date.now())), state.turns);
+  // Chrome can close without a STOP. The previous session's mistakes are still
+  // in memory and still unmerged: send them to the history before moving on.
+  if (state.memory?.errors?.length && !state.memory.merged) await mergeIntoLake().catch(() => {});
   if (!stored) await saveMemory(state.memory);
 
   state.workCtx = new AudioContext({ sampleRate: SR });
@@ -628,6 +643,7 @@ async function stop() {
     (async () => {
       await waitForQueue();
       await distill({ force: true }).catch(() => {});
+      await mergeIntoLake().catch(() => {});
       status('Detenido.', 'info');
       makeReport(true);
     })();
@@ -635,6 +651,7 @@ async function stop() {
     (async () => {
       await waitForQueue();
       await distill({ force: true }).catch(() => {});
+      await mergeIntoLake().catch(() => {});
       status('Detenido.', 'info');
     })();
   }
