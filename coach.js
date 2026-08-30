@@ -210,16 +210,18 @@ export const coverageOf = (m = {}) => {
 
 // The distilled record of the whole conversation, so the summary stops being
 // built from whatever fitted in the tail.
-export function memoryBlock(memory) {
+export function memoryBlock(memory, recurring = []) {
   if (!memory) return '';
   const { topics = [], open = [], errors = [] } = memory;
-  if (!topics.length && !open.length && !errors.length) return '';
+  if (!topics.length && !open.length && !errors.length && !recurring.length) return '';
   const parts = [];
   if (topics.length) parts.push('TEMAS REGISTRADOS (cubren toda la conversación):\n'
     + topics.map((t) => `  · ${t.text}`).join('\n'));
   if (open.length) parts.push('PENDIENTES REGISTRADOS:\n' + open.map((t) => `  · ${t.text}`).join('\n'));
   if (errors.length) parts.push('ERRORES DETECTADOS (ya verificados contra la transcripción):\n'
     + errors.map((e) => `  · ${e.wrong} → ${e.right} [${e.kind}] — dijo: "${e.said}"`).join('\n'));
+  if (recurring.length) parts.push('ERRORES RECURRENTES (detectados en varias conversaciones anteriores):\n'
+    + recurring.map((e) => `  · ${e.wrong} → ${e.right} — ${e.count} conversaciones`).join('\n'));
   const cobertura = coverageOf(memory);
   if (cobertura < 100) parts.push(`COBERTURA: la memoria cubre aproximadamente el ${cobertura}% de la conversación.`);
   return parts.join('\n\n');
@@ -593,6 +595,8 @@ Muletillas, repeticiones, frases inacabadas. Menciónalo solo si hay evidencia e
 ## Lo que tienes que aprender
 Las 5 frases o palabras que más te conviene memorizar a partir de tus propios errores de hoy.
 Cada una con el inglés en negrita, una glosa corta en español y la frase real donde falló.
+Si se te entregan ERRORES RECURRENTES, empieza por ellos y dilo explícitamente: son los que el
+alumno repite en varias conversaciones, no fallos de hoy.
 
 ## Nivel y plan
 Nivel CEFR aproximado con una frase de justificación, tres ejercicios concretos para esta semana
@@ -637,17 +641,19 @@ transcripción.
 4 o 5 fórmulas que encajaban en esta conversación (para estructurar una respuesta, ganar unos
 segundos, cerrar un punto), cada una con el momento real donde encajaba. Empieza por las que
 corrigen los ERRORES DETECTADOS que se te entregan, si los hay.
+Si se te entregan ERRORES RECURRENTES, empieza por ellos y dilo explícitamente: son los que el
+alumno repite en varias conversaciones, no fallos de hoy.
 
 ## Plan
 Tres ejercicios concretos para esta semana y un consejo profesional de coach: qué hacer distinto
 en la próxima conversación para que cada una mejore la anterior.`;
 
-export async function askReport({ turns, settings, memory = null }) {
+export async function askReport({ turns, settings, memory = null, recurring = [] }) {
   const mine = turns.filter((t) => t.speaker === 'me').length;
   if (mine === 0) throw new CoachError('No hay intervenciones tuyas para analizar.');
   const texto = turnsToText(turns, 400, REPORT_MAX_CHARS);
   const recortada = texto.split('\n').length < turns.length;
-  const recuerdo = memoryBlock(memory);
+  const recuerdo = memoryBlock(memory, recurring);
   return ask({
     provider: settings.reportProvider,
     model: settings.reportModel,

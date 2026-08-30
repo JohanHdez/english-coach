@@ -4,7 +4,7 @@
 import { Segmenter, floatToWav, isJunk, foldIntoTranscript, SR } from './segmenter.js';
 import { openCaptureStream } from './capture.js';
 import { askHints, askStarter, askReply, askReport, askDistill, tpmOf, groqBaseOf, redact, resolveProvider, PROVIDERS, DEFAULT_COACH } from './coach.js';
-import { sizing, emptyMemory, reconcile, selectChunk, acceptItems, acceptErrors, mergeTopics, Ledger, CAPS, DISTILL_COOLDOWN_MS, mergeLake, emptyLake } from './memory.js';
+import { sizing, emptyMemory, reconcile, selectChunk, acceptItems, acceptErrors, mergeTopics, Ledger, CAPS, DISTILL_COOLDOWN_MS, mergeLake, emptyLake, confirmedEntries } from './memory.js';
 import { buildReplyContext } from './retrieval.js';
 import { startLive, liveAvailability } from './live.js';
 
@@ -292,7 +292,13 @@ async function makeReport(auto = false) {
   }
   try {
     state.ledger.spend('report');
-    const markdown = await askReport({ turns: sortedTurns(), settings, memory: await loadMemory() });
+    const { lake } = (await store.get('lake')) || {};
+    const markdown = await askReport({
+      turns: sortedTurns(),
+      settings,
+      memory: await loadMemory(),
+      recurring: confirmedEntries(lake || emptyLake()),
+    });
     const asText = sortedTurns()
       .map((e) => `**${e.speaker === 'me' ? 'Yo' : 'Interlocutor'}**: ${e.text}`)
       .join('\n\n');

@@ -166,3 +166,12 @@ test('memoryBlock lists the recorded topics, commitments and mistakes', () => {
 test('memoryBlock is empty when nothing was distilled', () => {
   assert.equal(memoryBlock({ rounds: 0, skipped: 0, topics: [], open: [], errors: [] }), '');
 });
+
+test('memoryBlock separates today from what the learner repeats', () => {
+  const out = memoryBlock(
+    { rounds: 1, skipped: 0, topics: [], open: [], errors: [] },
+    [{ wrong: 'depends of', right: 'depends on', kind: 'grammar', count: 4, samples: ['it depends of the load'] }],
+  );
+  assert.match(out, /ERRORES RECURRENTES/);
+  assert.match(out, /4 conversaciones/);
+});
