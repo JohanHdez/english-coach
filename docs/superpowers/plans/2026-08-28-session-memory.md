@@ -1883,7 +1883,11 @@ git commit -m "feat(memory): accumulated error lake with recurrence counting and
 // repeated all afternoon still counts as one occurrence.
 async function mergeIntoLake() {
   const memory = state.memory;
-  if (!memory || memory.merged || !memory.errors.length) return;
+  // Deliberately NOT gated on memory.merged. A crash-and-resume merges once from
+  // start(), and a boolean would then block every error recorded afterwards from
+  // ever reaching the lake — not even as a first sighting. mergeLake already
+  // dedupes per session, so calling it again is free and lossless.
+  if (!memory || !memory.errors.length) return;
   const { lake } = (await store.get('lake')) || {};
   const next = mergeLake(lake || emptyLake(), memory.errors, memory.sessionId, Date.now());
   await store.set({ lake: next });
@@ -2102,7 +2106,11 @@ Extend `memoryBlock`:
 
 ```js
 export function memoryBlock(memory, recurring = []) {
-  // …existing body, then, before the coverage line…
+  // `recurring` is an independent input: a session with no distilled memory at all
+  // still has a history worth showing.
+  if (!memory && !recurring.length) return '';
+  const m = memory || {};
+  // …existing body reading from `m`, then, before the coverage line…
   if (recurring.length) parts.push('ERRORES RECURRENTES (detectados en varias conversaciones anteriores):\n'
     + recurring.map((e) => `  · ${e.wrong} → ${e.right} — ${e.count} conversaciones`).join('\n'));
 ```
