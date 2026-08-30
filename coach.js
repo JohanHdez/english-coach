@@ -565,10 +565,13 @@ inexistentes o jerga técnica deformada («request quid», «ray-tree after heat
 el reconocedor destrozando un término técnico, no un error del alumno: trátala como ruido y no
 la lleves a la tabla de gramática.
 
-El «Resumen de la reunión» se construye A PARTIR DE LOS TEMAS REGISTRADOS que se te entregan: no
-añadas ningún tema que no esté en esa lista. Los «Pendientes» salen únicamente de los PENDIENTES
-REGISTRADOS. La tabla de errores parte de los ERRORES DETECTADOS: explícalos y ordénalos por
-importancia; puedes añadir como máximo dos más que encuentres en la transcripción.
+Si se te entregan TEMAS REGISTRADOS, el «Resumen de la reunión» se construye A PARTIR de esa
+lista: no añadas ningún tema que no esté en ella. Si no se te entregan, resume a partir de la
+transcripción completa. Si se te entregan PENDIENTES REGISTRADOS, los «Pendientes» salen
+únicamente de ahí; si no, tómalos de la transcripción. Si se te entregan ERRORES DETECTADOS, la
+tabla de errores parte de ellos: explícalos y ordénalos por importancia, y puedes añadir como
+máximo dos más que encuentres en la transcripción; si no se te entregan, arma la tabla
+directamente a partir de la transcripción.
 Si se te indica una COBERTURA por debajo del 100%, dilo en una línea al final del resumen.
 
 Responde en español, en Markdown, con exactamente estas secciones:
@@ -619,10 +622,13 @@ conversación; el resto de secciones analiza SOLO las intervenciones del cliente
 La transcripción viene de reconocimiento automático: palabras inexistentes o jerga deformada
 son ruido del reconocedor, no errores del cliente — ignóralas.
 
-El «Resumen de la reunión» se construye A PARTIR DE LOS TEMAS REGISTRADOS que se te entregan: no
-añadas ningún tema que no esté en esa lista. Los «Pendientes» salen únicamente de los PENDIENTES
-REGISTRADOS. La tabla de errores parte de los ERRORES DETECTADOS: explícalos y ordénalos por
-importancia; puedes añadir como máximo dos más que encuentres en la transcripción.
+Si se te entregan TEMAS REGISTRADOS, el «Resumen de la reunión» se construye A PARTIR de esa
+lista: no añadas ningún tema que no esté en ella. Si no se te entregan, resume a partir de la
+transcripción completa. Si se te entregan PENDIENTES REGISTRADOS, los «Pendientes» salen
+únicamente de ahí; si no, tómalos de la transcripción. Si se te entregan ERRORES DETECTADOS, la
+tabla de errores parte de ellos: explícalos y ordénalos por importancia, y puedes añadir como
+máximo dos más que encuentres en la transcripción; si no se te entregan, arma la tabla
+directamente a partir de la transcripción.
 Si se te indica una COBERTURA por debajo del 100%, dilo en una línea al final del resumen.
 
 Responde en español, en Markdown, con exactamente estas secciones:
