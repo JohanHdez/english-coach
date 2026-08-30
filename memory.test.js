@@ -269,3 +269,31 @@ test('the lake stays capped and a recurrent mistake outlives a flood of one-offs
   assert.equal(lake.entries.length, 200);
   assert.ok(lake.entries.some((e) => e.key === lakeKey('depends of', 'depends on')));
 });
+
+// mergeIntoLake in offscreen.js filters memory.errors down to `e.t > mergedUntil`
+// before calling mergeLake, then advances the watermark to the newest merged `t`.
+// Reproduced here against the pure primitive: resubmitting the whole accumulated
+// errors array under a rotated sessionId would silently promote the first error
+// to "confirmed" a session early — exactly the false recurrence the watermark
+// exists to prevent.
+test('a watermark of already-merged errors keeps a rotated sessionId from re-counting old mistakes', () => {
+  const first = { ...err('depends of', 'depends on'), t: 100 };
+  const second = { ...err('request quid', 'request queued'), t: 200 };
+
+  let lake = emptyLake();
+  let mergedUntil = 0;
+
+  const freshAtFirstMerge = [first].filter((e) => e.t > mergedUntil);
+  lake = mergeLake(lake, freshAtFirstMerge, 's1', 1000);
+  mergedUntil = freshAtFirstMerge.reduce((n, e) => (e.t > n ? e.t : n), mergedUntil);
+
+  // memory.errors accumulates across sessions (capped, but never truncated here);
+  // only what is newer than the watermark should reach the second merge.
+  const accumulated = [first, second];
+  const freshAtSecondMerge = accumulated.filter((e) => e.t > mergedUntil);
+  lake = mergeLake(lake, freshAtSecondMerge, 's2', 2000);
+
+  assert.equal(lake.entries.find((e) => e.key === lakeKey('depends of', 'depends on')).count, 1);
+  assert.equal(lake.entries.find((e) => e.key === lakeKey('request quid', 'request queued')).count, 1);
+  assert.deepEqual(confirmedEntries(lake), []);
+});

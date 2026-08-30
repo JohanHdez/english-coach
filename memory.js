@@ -24,7 +24,7 @@ export function sizing(tpm) {
 
 export function emptyMemory(sessionId) {
   return {
-    sessionId, coveredUntil: 0, carry: '', merged: false,
+    sessionId, coveredUntil: 0, carry: '', merged: false, mergedUntil: 0,
     topics: [], open: [], errors: [],
     rounds: 0, skipped: 0, rejected: 0,
   };

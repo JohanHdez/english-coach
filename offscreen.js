@@ -122,15 +122,17 @@ const saveMemory = (memory) => { state.memory = memory; return store.set({ memor
 // repeated all afternoon still counts as one occurrence.
 async function mergeIntoLake() {
   const memory = state.memory;
-  // Deliberately NOT gated on memory.merged. A crash-and-resume merges once from
-  // start(), and a boolean would then block every error recorded afterwards from
-  // ever reaching the lake — not even as a first sighting. mergeLake already
-  // dedupes per session, so calling it again is free and lossless.
-  if (!memory || !memory.errors.length) return;
+  if (!memory) return;
+  // Only what this session added since the last merge. Resubmitting the whole
+  // array under a rotated sessionId would count old mistakes as fresh sightings
+  // and manufacture recurrence the learner never produced.
+  const fresh = memory.errors.filter((e) => e.t > (memory.mergedUntil || 0));
+  if (!fresh.length) return;
   const { lake } = (await store.get('lake')) || {};
-  const next = mergeLake(lake || emptyLake(), memory.errors, memory.sessionId, Date.now());
+  const next = mergeLake(lake || emptyLake(), fresh, memory.sessionId, Date.now());
   await store.set({ lake: next });
   memory.merged = true;
+  memory.mergedUntil = fresh.reduce((n, e) => (e.t > n ? e.t : n), memory.mergedUntil || 0);
   await saveMemory(memory);
 }
 
@@ -525,11 +527,17 @@ async function start(streamId, settings, streamKind) {
   const { transcript = [] } = (await store.get('transcript')) || {};
   state.turns = transcript;
   const stored = (await store.get('memory'))?.memory;
-  state.memory = reconcile(stored || emptyMemory(String(Date.now())), state.turns);
+  state.memory = reconcile(stored || emptyMemory(null), state.turns);
   // Chrome can close without a STOP. The previous session's mistakes are still
-  // in memory and still unmerged: send them to the history before moving on.
+  // in memory and still unmerged: send them to the history under their own id,
+  // before this session takes over.
   if (state.memory?.errors?.length && !state.memory.merged) await mergeIntoLake().catch(() => {});
-  if (!stored) await saveMemory(state.memory);
+  // A new recording is a new session for recurrence, even when it continues the
+  // same transcript. Without rotating, every session shares one id, mergeLake's
+  // per-session guard keeps `count` at 1, and nothing ever crosses RECURRENCE_MIN.
+  state.memory.sessionId = String(Date.now());
+  state.memory.merged = false;
+  await saveMemory(state.memory);
 
   state.workCtx = new AudioContext({ sampleRate: SR });
   await state.workCtx.audioWorklet.addModule(chrome.runtime.getURL('recorder-worklet.js'));
