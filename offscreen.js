@@ -165,6 +165,11 @@ async function distill({ force = false } = {}) {
   let memory = null;
   try {
     const settings = await ensureSettings();
+    // PRIVACY.md promises that with the coach disabled nothing is sent. Gating here
+    // — before loadMemory, and ahead of the force check — covers the forced flush at
+    // stop() as well as every background round; distillEligible alone would not,
+    // since the forced flush skips it entirely.
+    if (!settings.liveCoach) return false;
     memory = await loadMemory();
     const { chunkChars } = sizing(tpmOf(settings));
     const chunk = selectChunk(state.turns, memory, chunkChars, { all: force });
