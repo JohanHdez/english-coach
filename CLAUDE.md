@@ -90,6 +90,10 @@ Chrome reports with an unrelated error message.
     `selectChunk` never includes it. Distilling it loses the appended text silently: no error,
     no warning, just a hole in the memory.
 
+`chrome.storage.local` holds `settings`, `transcript`, `report`, `lastError`, `setupDone`,
+`memory` (the distilled session memory, cleared with the transcript) and `lake` (the accumulated
+error history, which deliberately survives everything and is capped at 200 entries).
+
 ## Message protocol
 
 Every message carries a `target` (`background` | `offscreen` | `ui`) and a SCREAMING_SNAKE

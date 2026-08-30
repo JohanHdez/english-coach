@@ -31,6 +31,13 @@ If you enable the coach, the conversation text is sent to the provider you confi
 `api.groq.com` or `api.anthropic.com` — to generate the suggestions and the report. With the
 coach disabled, nothing is sent.
 
+**Histórico de errores.** La extensión guarda en `chrome.storage.local` los errores de inglés
+detectados en tus conversaciones: la expresión incorrecta, su corrección y hasta tres frases
+tuyas como evidencia. A diferencia de la transcripción, **este histórico sobrevive a las
+sesiones**, porque su valor es detectar lo que repites. Nunca sale de tu equipo y nunca se envía
+a ningún proveedor salvo como parte del informe que tú pides. Puedes borrar una entrada desde el
+informe («Esto no era un error») o vaciarlo entero desde Ajustes.
+
 ### Your profile
 
 The «Tu perfil» field in Settings is optional and empty by default. If you fill it in, its
