@@ -122,7 +122,11 @@ const saveMemory = (memory) => { state.memory = memory; return store.set({ memor
 // repeated all afternoon still counts as one occurrence.
 async function mergeIntoLake() {
   const memory = state.memory;
-  if (!memory || memory.merged || !memory.errors.length) return;
+  // Deliberately NOT gated on memory.merged. A crash-and-resume merges once from
+  // start(), and a boolean would then block every error recorded afterwards from
+  // ever reaching the lake — not even as a first sighting. mergeLake already
+  // dedupes per session, so calling it again is free and lossless.
+  if (!memory || !memory.errors.length) return;
   const { lake } = (await store.get('lake')) || {};
   const next = mergeLake(lake || emptyLake(), memory.errors, memory.sessionId, Date.now());
   await store.set({ lake: next });
