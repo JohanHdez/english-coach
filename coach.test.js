@@ -151,6 +151,14 @@ test('coverageOf reports the share of rounds that actually ran', () => {
   assert.equal(coverageOf({ rounds: 0, skipped: 0 }), 100);
 });
 
+// A default parameter only substitutes on undefined; memoryBlock passes a plain
+// null through when there is no distilled memory, so coverageOf has to survive
+// that on its own.
+test('coverageOf does not throw on a null memory', () => {
+  assert.equal(coverageOf(null), 100);
+  assert.equal(coverageOf(undefined), 100);
+});
+
 test('memoryBlock lists the recorded topics, commitments and mistakes', () => {
   const out = memoryBlock({
     rounds: 2, skipped: 0,
@@ -174,4 +182,20 @@ test('memoryBlock separates today from what the learner repeats', () => {
   );
   assert.match(out, /ERRORES RECURRENTES/);
   assert.match(out, /4 conversaciones/);
+});
+
+// The real path this covers: askReport's memory defaults to null, and a manual
+// report before any distillation round has run (or after a 429 ate every one)
+// hits this exact call — a null memory with a non-empty recurring history. It
+// used to throw inside coverageOf before ever rendering the recurring block.
+test('memoryBlock renders the recurring block from a null memory without throwing', () => {
+  assert.doesNotThrow(() => memoryBlock(null, [
+    { wrong: 'depends of', right: 'depends on', kind: 'grammar', count: 3, samples: ['it depends of the load'] },
+  ]));
+  const out = memoryBlock(null, [
+    { wrong: 'depends of', right: 'depends on', kind: 'grammar', count: 3, samples: ['it depends of the load'] },
+  ]);
+  assert.match(out, /ERRORES RECURRENTES/);
+  assert.match(out, /3 conversaciones/);
+  assert.ok(!out.includes('COBERTURA'));
 });

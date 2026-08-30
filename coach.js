@@ -203,9 +203,13 @@ export function turnsToText(turns, limit = 10, maxChars = Infinity) {
 // can shrink to pay for them: coverage goes up while the token cost stays flat.
 const REPORT_MAX_CHARS = 8000;
 
-export const coverageOf = (m = {}) => {
-  const total = (m.rounds || 0) + (m.skipped || 0);
-  return total ? Math.round(((m.rounds || 0) / total) * 100) : 100;
+export const coverageOf = (m) => {
+  // A default parameter only substitutes on undefined, not null — and memoryBlock
+  // deliberately lets a null memory through when there is a recurring history to
+  // show, so this has to be null-safe on its own.
+  const { rounds = 0, skipped = 0 } = m || {};
+  const total = rounds + skipped;
+  return total ? Math.round((rounds / total) * 100) : 100;
 };
 
 // The distilled record of the whole conversation, so the summary stops being
