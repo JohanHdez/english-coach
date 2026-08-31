@@ -21,6 +21,34 @@
       code { background: var(--bg); border: 1px solid var(--border); padding: 1px 5px; border-radius: 5px; font-size: 12px; }
       .ok { color: #2f9e44; } .err { color: var(--danger); }
       .hint { color: var(--muted); font-size: 12px; margin: 4px 0 0; }
+      .row { display: flex; gap: 8px; align-items: center; }
+      .row input[type="text"] { flex: 1; }
+      h3 { font-size: 13px; margin: 14px 0 6px; }
+      #catalogue h3:first-child { margin-top: 0; }
+      .phrase-row {
+        display: flex; align-items: baseline; gap: 6px; padding: 4px 0;
+        font-size: 12.5px; cursor: pointer;
+      }
+      .phrase-row .hint { margin: 0; }
+      #customList .phrase-row { cursor: default; }
+      #customList .phrase-row button { margin-left: auto; }
+      .say {
+        margin-left: auto; background: none; border: 0; padding: 0 4px;
+        font-size: 13px; line-height: 1; cursor: pointer; opacity: .55;
+      }
+      .say:hover { opacity: 1; }
+      #customList .phrase-row .say { margin-left: auto; }
+      #customList .phrase-row .small { margin-left: 0; }
+      .note-edit {
+        display: flex; flex-direction: column; gap: 6px;
+        padding: 10px; margin-bottom: 10px; border: 1px solid var(--border); border-radius: 8px;
+      }
+      .note-edit textarea {
+        width: 100%; padding: 8px 9px; border-radius: 8px; border: 1px solid var(--border);
+        background: var(--bg); color: var(--text); font-size: 12.5px; font-family: inherit;
+        resize: vertical;
+      }
+      .note-edit button { align-self: flex-start; }
     </style>
   </head>
   <body>
@@ -92,7 +120,7 @@
 
     <div class="card">
       <h2 style="margin-top:0">3. Coach</h2>
-      <p class="hint">Las sugerencias en vivo y el informe final los genera un modelo de lenguaje. <b>Con una key gratuita de Groq funciona todo</b>: créala en <a href="https://console.groq.com/keys" target="_blank" rel="noreferrer">console.groq.com/keys</a>, sin tarjeta. La de Claude es opcional y de pago; sólo compensa si quieres informes más finos.</p>
+      <p class="hint">La respuesta sugerida y el informe final los genera un modelo de lenguaje, así que necesitan una API key. Los chips y las notas no: funcionan sin key y sin conexión. <b>Con una key gratuita de Groq tienes respuesta e informe</b>: créala en <a href="https://console.groq.com/keys" target="_blank" rel="noreferrer">console.groq.com/keys</a>, sin tarjeta. La de Claude es opcional y de pago; sólo compensa si quieres informes más finos.</p>
 
       <div class="field">
         <span>Groq API key <em style="color:var(--muted)">(gratis en console.groq.com)</em></span>
@@ -105,12 +133,8 @@
 
       <label class="check" style="margin:12px 0">
         <input type="checkbox" id="liveCoach" checked />
-        <span>Sugerencias en vivo durante la conversación</span>
+        <span>Mostrar chips y notas durante la conversación</span>
       </label>
-      <div class="field">
-        <span>Modelo para las sugerencias en vivo (prioriza velocidad)</span>
-        <select id="liveModel"></select>
-      </div>
 
       <label class="check" style="margin:12px 0">
         <input type="checkbox" id="floatingWindow" />
@@ -123,7 +147,7 @@
         <span>Generar el informe automáticamente al detener la grabación</span>
       </label>
       <div class="field">
-        <span>Modelo para el informe (prioriza calidad)</span>
+        <span>Modelo para la respuesta sugerida y el informe (prioriza calidad)</span>
         <select id="reportModel"></select>
       </div>
       <p id="keyWarn" class="hint err" hidden></p>
@@ -162,7 +186,26 @@
     </div>
 
     <div class="card">
-      <h2 style="margin-top:0">4. Cómo capturar cada fuente</h2>
+      <h2 style="margin-top:0">4. Chips y notas</h2>
+      <p class="hint">Las frases que quieres ver durante la conversación. No usan API ni conexión.</p>
+      <div id="catalogue"></div>
+
+      <h3>Añadir una frase tuya</h3>
+      <div class="row">
+        <input type="text" id="customEn" placeholder="Let me double-check that," />
+        <input type="text" id="customEs" placeholder="déjame confirmarlo" />
+        <button id="addPhrase" class="small" type="button">Añadir</button>
+      </div>
+      <div id="customList"></div>
+
+      <h3>Notas</h3>
+      <p class="hint">Apuntes tuyos: un título corto y el texto que quieras tener a mano.</p>
+      <div id="noteList"></div>
+      <button id="addNote" class="small" type="button">Añadir nota</button>
+    </div>
+
+    <div class="card">
+      <h2 style="margin-top:0">5. Cómo capturar cada fuente</h2>
       <ul>
         <li><strong>Google Meet, Zoom web, Teams web, YouTube…</strong> → deja «Audio del interlocutor: Pestaña actual». Abre la reunión, haz clic en el icono de la extensión y pulsa <em>Empezar</em>.</li>
         <li><strong>Apps de escritorio (Zoom, Teams, FaceTime)</strong> → una extensión de Chrome no puede oír otras apps. En Mac instala <code>BlackHole 2ch</code>, crea un <em>Dispositivo de salida múltiple</em> (parlantes + BlackHole) en «Configuración de Audio MIDI», ponlo como salida del sistema y elige «Dispositivo de entrada → BlackHole 2ch» en el panel.</li>

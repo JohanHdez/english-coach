@@ -55,16 +55,18 @@ options block, and its host in `manifest.json`. Audio reaches an API as a WAV bl
   provider's base. Never log it, never put it in a URL.
 - **Fail with a message the user can act on.** "Falta la API key de X (ábrela en Ajustes)" is the
   established shape. A raw status code is not.
-- **Live hints must stay fast.** They run after every turn of the other speaker, debounced 1.2 s
-  with a 6 s cooldown. A provider slower than roughly two seconds is unusable there — offer it for
-  the report only, and say so.
-- **Hints request JSON, and how you request it matters.** Prefer constrained decoding
+- **The suggested reply must stay reasonably fast.** It runs on demand (`⌘⇧E`), with the learner
+  waiting mid-conversation for it — a provider slower than a couple of seconds reads as broken.
+  The report has no such constraint: it runs once, after the conversation ends. The chips need no
+  provider at all — they are a curated phrasebook (`phrasebook.js`), never a model call.
+- **The reply requests JSON, and how you request it matters.** Prefer constrained decoding
   (`json_schema` with `strict: true`) over after-the-fact validation (`json_object`). Groq's
   `json_object` mode validates what the model already produced, and reasoning models such as
   `openai/gpt-oss-*` leak reasoning tokens into that output — Groq then rejects the whole call
-  with `json_validate_failed` and the chips never appear. `groqResponseFormat()` in `coach.js`
+  with `json_validate_failed` and the reply never appears. `groqResponseFormat()` in `coach.js`
   routes per model; extend it rather than making every model share one mode. `parseJsonLoose`
-  is a tolerance layer for providers with no structured mode at all, not a substitute.
+  is a tolerance layer for providers with no structured mode at all, not a substitute. The report
+  is plain text, not JSON, and is unaffected by this.
 - **Give reasoning models room.** Reasoning tokens count against `max_completion_tokens`. A
   budget sized for the visible answer alone will truncate the response.
 - **User-facing strings are Spanish**, matching `setup.html`. Prompts stay as they are.
@@ -75,6 +77,7 @@ options block, and its host in `manifest.json`. Audio reaches an API as a WAV bl
 node .claude/skills/preflight/scripts/preflight.mjs
 ```
 
-Then in Chrome: reload the extension, save a key in Options, and exercise the path you added —
-a live hint for a live provider, a report for a report provider. Report which of the two you
-actually ran. Static checks confirm nothing about whether the API answers.
+Then in Chrome: reload the extension, save a key in Options, and exercise the path you added — a
+suggested reply (`⌘⇧E`) and a report both go through the same coach provider now, so either one
+exercises the wiring. Report which of the two you actually ran. Static checks confirm nothing
+about whether the API answers.

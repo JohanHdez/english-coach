@@ -1,6 +1,8 @@
 // Service worker: coordinates the side panel, the in-page overlay and the
 // offscreen document (which does the recording, transcribing and coaching).
 
+import { resolveChips, toggleNoteOpen } from './phrasebook.js';
+
 const OFFSCREEN_URL = 'offscreen.html';
 
 // The tab currently showing the overlay, plus the last broadcast state, so the
@@ -8,7 +10,7 @@ const OFFSCREEN_URL = 'offscreen.html';
 let sessionTabId = null;
 let running = false;
 let coachWindowId = null;
-const lastUi = { hints: null, reply: null, status: null, live: null };
+const lastUi = { chips: null, reply: null, status: null, live: null };
 
 // When a tab is shared, Chrome can leave the user in a window with no side panel
 // and no extension bar: a system notification is the only thing they are
@@ -140,18 +142,16 @@ if (chrome.commands?.onCommand) {
   });
 }
 
-// The offscreen document re-reads settings on every coach call, but the starter
-// kit is event-driven: forward the edit so notes typed mid-session (side panel
-// or Settings) regenerate the opening chips. The offscreen document decides
-// whether a session is actually running — module state here is ephemeral.
-chrome.storage.onChanged.addListener(async (changes, area) => {
+// Chips come from settings, so any edit to them — Settings page, side panel, or a
+// note toggled open during a session — has to reach the three views.
+const CHIP_KEYS = ['phraseIds', 'customPhrases', 'notes', 'liveCoach'];
+
+chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== 'local' || !changes.settings) return;
-  const antes = changes.settings.oldValue?.sessionContext || '';
-  const ahora = changes.settings.newValue?.sessionContext || '';
-  if (antes === ahora) return;
-  if (await hasOffscreen()) {
-    chrome.runtime.sendMessage({ target: 'offscreen', type: 'CONTEXT_CHANGED' }).catch(() => {});
-  }
+  const before = changes.settings.oldValue || {};
+  const after = changes.settings.newValue || {};
+  const touched = CHIP_KEYS.some((k) => JSON.stringify(before[k]) !== JSON.stringify(after[k]));
+  if (touched) broadcastChips().catch(() => {});
 });
 
 async function hasOffscreen() {
@@ -197,6 +197,18 @@ function relayToTab(msg) {
   chrome.tabs.sendMessage(sessionTabId, msg).catch(() => {});
 }
 
+// Chips are settings state, not session state: they no longer come from a model,
+// so the service worker owns them. It is the only context with both chrome.storage
+// and chrome.tabs — the offscreen document has neither, and the overlay has no
+// storage. Broadcast whether or not a session is running.
+async function broadcastChips() {
+  const { settings = {} } = await chrome.storage.local.get('settings');
+  const msg = { target: 'ui', type: 'COACH_CHIPS', ...resolveChips(settings) };
+  lastUi.chips = msg;
+  chrome.runtime.sendMessage(msg).catch(() => {});
+  relayToTab(msg);
+}
+
 // Injects the overlay into a tab and brings it up to date. Called on start, on
 // tab switch and after every reload, so the bar is never lost.
 async function attachOverlay(tabId) {
@@ -209,7 +221,7 @@ async function attachOverlay(tabId) {
   try {
     await chrome.tabs.sendMessage(tabId, { target: 'ui', type: 'RUNNING', running: true });
     if (lastUi.live) await chrome.tabs.sendMessage(tabId, lastUi.live);
-    if (lastUi.hints) await chrome.tabs.sendMessage(tabId, lastUi.hints);
+    if (lastUi.chips) await chrome.tabs.sendMessage(tabId, lastUi.chips);
     if (lastUi.reply) await chrome.tabs.sendMessage(tabId, lastUi.reply);
   } catch { /* la pestaña no admite overlay */ }
 }
@@ -273,7 +285,6 @@ async function startCapture(settings, invocation = {}) {
   // Cleared before the start, not after: the offscreen document broadcasts
   // LIVE_STATE from inside its own start(), so by the time sendStart resolves the
   // cache already holds this session's value and wiping it would lose the notice.
-  lastUi.hints = null;
   lastUi.reply = null;
   lastUi.live = null;
 
@@ -336,7 +347,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   // Everything the offscreen document broadcasts for the UIs is mirrored into the tab.
   if (msg.target === 'ui') {
     if (msg.type === 'RUNNING') running = msg.running;
-    if (msg.type === 'HINTS') lastUi.hints = msg;
     if (msg.type === 'REPLY' && !msg.pending) lastUi.reply = msg;
     if (msg.type === 'STATUS') lastUi.status = msg;
     // Not a delta but a condition of the session: an overlay injected after a
@@ -368,6 +378,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             }
             throw e;
           }
+          broadcastChips().catch(() => {});
           if (merged.floatingWindow === true) await openCoachWindow();
           sendResponse({ ok: true });
           break;
@@ -396,7 +407,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           sendResponse({
             running,
             turns: transcript.slice(-12),
-            hints: lastUi.hints,
+            // lastUi is module state and is gone after a worker suspension, but the
+            // chips derive from settings, which is already in hand: rebuild rather
+            // than answer a reinjected overlay with an empty lane.
+            chips: lastUi.chips || { target: 'ui', type: 'COACH_CHIPS', ...resolveChips(settings) },
             reply: lastUi.reply,
             status: lastUi.status,
             live: lastUi.live,
@@ -410,6 +424,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         }
         case 'STORE_SET': {
           await chrome.storage.local.set(msg.items);
+          sendResponse({ ok: true });
+          break;
+        }
+        // The overlay has no chrome.storage: it flips a note's open state here.
+        // Only the write happens — storage.onChanged re-broadcasts COACH_CHIPS.
+        case 'TOGGLE_NOTE': {
+          const { settings = {} } = await chrome.storage.local.get('settings');
+          await chrome.storage.local.set({ settings: toggleNoteOpen(settings, msg.id) });
           sendResponse({ ok: true });
           break;
         }

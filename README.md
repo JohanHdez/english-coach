@@ -5,7 +5,7 @@ are talking to) and your microphone (you) — transcribes them, and hands you th
 labelled by speaker, ready to analyse your English.
 
 The extension's interface is in **Spanish on purpose**: it is a tool for Spanish speakers
-practising English, so the hints, the nudges and the report are written in the learner's
+practising English, so the chips, the notes and the report are written in the learner's
 language. The codebase and its documentation are in English.
 
 - **Free end to end**: Whisper runs inside your browser with `transformers.js` + ONNX Runtime,
@@ -89,7 +89,7 @@ above) — in that case the card shows the shortcut instead of starting.
 
 The main interface is a **floating overlay inside the tab itself**: it appears when recording
 starts filling the screen's height, drags from its header, **resizes from the bottom-right
-corner**, collapses with «–» and hides with «✕». The coach stays pinned — chips and openers at
+corner**, collapses with «–» and hides with «✕». The coach stays pinned — chips and notes at
 the top, the suggested reply next to its button at the bottom — and only the conversation
 scrolls between them, so a long conversation never pushes the help out of sight.
 
@@ -111,62 +111,59 @@ And if something fails at startup you see it three ways: a **system notification
 error text (it shows when you reopen the panel even if it was closed when the failure happened),
 and the overlay itself inside the page.
 
-## Coach: live suggestions and a closing report
+## Coach: chips, notes, a suggested reply and a closing report
 
-Two optional layers that need a free API key (section 3 of Settings).
+**Chips and notes need no API key and no network.** They come from a catalogue you curate in
+Settings (section 4), not from a model. The side panel shows them as soon as you open it — even
+**before you start recording**; the page overlay shows them the moment a session starts, not
+after the other person's first turn like the old per-turn suggestions did. Only the suggested
+reply and the closing report call a model, and only those two need a free API key (section 3 of
+Settings).
 
-**During the conversation.** Each time the other person stops talking, a bar appears with 3–4
-expressions you are likely to need (`catch up on`, `off the top of my head`…), two or three
-ways to open your answer («The way it works is…»), and a short nudge in Spanish about how to
-frame it. They are chips, not paragraphs: readable at a glance without losing the thread. Long
-monologues are split at breath dips, so the transcript, its translation and the chips keep
-flowing while the other person is still talking instead of landing as one huge paragraph at
-the end. On screen those pieces — and the fragments your own thinking pauses produce — **fold
-back into one block per idea**: consecutive segments of the same speaker close in time extend
-the previous turn instead of stacking a new one, and the translation is redone over the whole
-merged thought rather than fragment by fragment.
+**Chips.** Section 4 — «Chips y notas» — lists connectors, ways to stall for time, ask for
+clarification, contrast, structure an answer, close, react, and admit "I don't know" well
+(`Give me a second,`, `Could you clarify that?`, `To sum up,`…), each with a short Spanish gloss.
+Tick the ones you want, or add your own; they show as a read-only bar above the conversation for
+the whole session — nothing regenerates them and nothing can time out or fail mid-conversation.
 
-If you get stuck, `⌘⇧E` (or `Ctrl+Shift+E`, or the «💡 Respuesta» button) gives you **one
-answer, not a menu**: in a live conversation you read the first option anyway, so alternatives
-are hesitation, not help. The answer is built to be read out loud — short sentences at your
-level, everyday words, at most one technical term (shown **bold** so you spot it mid-sentence)
-— and rendered big. Under it, two *richer versions with the precise terminology*, in small
-type: those are for studying after the conversation, not for reading live. Connectors to open
-your answer stay pinned above the conversation, where the live hints put them. One click copies
-any phrase. It works even while focus is on the meeting tab.
+**Notes.** Same section: your own free-form notes — a short title and the text you want at hand,
+for anything you keep forgetting to mention. Collapsed by default and opened with one click, and
+shared across views: opening a note in the overlay opens it in the side panel too, because it is
+settings state, not something either view owns on its own.
+
+**Suggested reply.** If you get stuck, `⌘⇧E` (or `Ctrl+Shift+E`, or the «💡 Respuesta» button)
+gives you **one answer, not a menu**: in a live conversation you read the first option anyway, so
+alternatives are hesitation, not help. The answer is built to be read out loud — short sentences
+at your level, everyday words, at most one technical term (shown **bold** so you spot it
+mid-sentence) — and rendered big. Under it, two *richer versions with the precise terminology*, in
+small type: those are for studying after the conversation, not for reading live. One click copies
+the answer or any of the study ideas. It works even while focus is on the meeting tab.
 
 **Your profile.** In Settings you can paste your experience as plain text (projects, tools,
 results). Without it, the suggested reply can only be generic: when someone asks «tell me what
 you actually built with them», the model has no idea what you built. With it, the reply is
 grounded in what you really did, and the prompt forbids inventing employers, job titles or
 figures that are not there — you are going to say this out loud as the truth. It is used for the
-suggested reply and the report, **not for the chips**: those run every six seconds, and repeating
-the profile in every round would exhaust the free tier's limit.
+suggested reply and the report; chips and notes never call a model, so nothing about the profile
+reaches them.
 
 **Today's context.** Next to the profile there is a per-meeting field — «Contexto de hoy» — for
 the topics of the conversation you are about to have: «entrevista técnica de Angular: signals,
 standalone components, RxJS». With it, when a **knowledge question** lands and you blank on the
-answer, the direct answer teaches you the right one, leaning on your notes plus the model's own
+answer, the direct answer teaches you the right one, leaning on that context plus the model's own
 knowledge of the subject; the biography rule still holds (it never invents your experience). It
 also feeds the report's meeting summary. It lives in Settings and in the side panel, and the
 side panel copy can be edited **mid-session**: the next suggested reply already uses it.
-
-The context also primes the session: when a session starts with notes in place, a one-off
-**starter round** of chips appears before the other person has said anything — connectors and
-phrases of that topic, and ways to open an answer. Editing the notes regenerates it, until the
-first real conversation round takes over. That single extra call aside, the context is sent
-only with the on-demand reply and the report, never with the periodic chips: those run every
-few seconds and would burn the free tier's minute.
 
 **Spanish sessions.** The side panel has a conversation-language selector. In Spanish mode the
 extension becomes professional support in your native language — a technical interview in
 Spanish, for example: transcription switches to the multilingual Whisper model (a new one-time
 download; the `.en` models only understand English), the live layer listens in Spanish (it
 needs Chrome's Spanish language pack), translation turns off (nothing to translate), the
-suggested answer and the starter chips arrive in Spanish, and the closing report changes from
-English teacher to **communication coach** — clarity, fillers, better phrasings and
-professional formulas instead of grammar tables and CEFR levels. The language is fixed while a
-session is running.
+suggested answer arrives in Spanish, and the closing report changes from English teacher to
+**communication coach** — clarity, fillers, better phrasings and professional formulas instead of
+grammar tables and CEFR levels. The chips stay exactly as you configured them — they do not
+change with the session language. The language is fixed while a session is running.
 
 **When you finish.** Pressing Stop generates the report automatically and opens it in a tab. It
 starts with a **meeting summary** — what was discussed and what was left pending (things agreed
@@ -177,20 +174,22 @@ expressions that fitted and you did not use, filler words, and an approximate CE
 three exercises for the week plus a coach's tip for the next conversation. It downloads as `.md`
 so you can keep a history.
 
-**One free Groq key covers everything.** Create it at
+**One free Groq key covers the reply and the report.** Create it at
 [console.groq.com/keys](https://console.groq.com/keys): no credit card. That is what ships by
-default: `gpt-oss-20b` (~1 s) for the chips, and `gpt-oss-120b` for the report **and for the
-on-demand suggested reply** — it is asked for once, not every few seconds, so the stronger
-model's extra second is worth it, especially for technical answers.
+default: `gpt-oss-120b` for both, since they share one model setting — the reply is asked for once
+per need, not on a timer, so the stronger model's extra second is worth it, especially for
+technical answers.
 
 Groq's free tier allows 30 requests per minute and 8000 tokens per minute. Comfortably enough:
-suggestions have a six-second cooldown between rounds, and the report trims the transcript to fit
-that budget even after a very long conversation. If you do hit the limit, the error says so and
+the reply and the report are both on demand, and the report trims the transcript to fit that
+budget even after a very long conversation. If you do hit the limit, the error says so and
 waiting a minute is all it takes.
 
-Claude is optional and **paid per use**. It only pays off if you want more nuanced reports; you
-can use it for the report alone and leave suggestions on Groq. If you pick a provider whose key
-you have not set, the extension uses the one you do have and tells you, instead of failing.
+Claude is optional and **paid per use**. It replaces Groq for both the suggested reply and the
+report — they share one model setting, so there is nothing to split between providers — and it
+only pays off if you want more nuanced answers. Chips, notes and transcription are unaffected
+either way: none of them call a coach provider. If you pick a provider whose key you have not
+set, the extension uses the one you do have and tells you, instead of failing.
 
 Everything points at Groq by default, but the endpoints are configurable (`groqBase` /
 `anthropicBase` in the saved settings): that is enough to use an OpenAI-compatible server such as
@@ -240,13 +239,15 @@ the API engine, and text only leaves if you enable the coach.
 | Short utterances | Discards noise and lone filler sounds («hmm», «uh», «ah») instead of transcribing them |
 | Live transcription | Shows what is being said as it happens: Chrome's on-device recognition (139+) word by word where available, otherwise a provisional Whisper pass over the phrase still being spoken (~1 s blocks, local engine only). The authoritative turn replaces it when the phrase closes |
 | Translate to Spanish | A Spanish line under each of the other speaker's turns, using Chrome's built-in translator (138+). Free, no key, and the text never leaves the machine |
-| Live coach | Vocabulary chips after each of the other speaker's turns + `⌘⇧E` for a full reply |
-| Report | Automatic on stop, or on demand with «Informe de la sesión» |
+| Show chips and notes | Toggles the phrase and notes bar during the conversation; needs no key either way |
+| Chips and notes | Curated phrase catalogue (tick or add your own) and free-form notes, both static, no key, no network |
+| Suggested reply | `⌘⇧E` for a one-answer reply, built to read out loud; needs an API key |
+| Report | Automatic on stop, or on demand with «Informe de la sesión»; needs an API key |
 | Separate window | Off by default: the coach lives inside the page. Turn it on if you are sharing the tab or want the coach on another monitor |
 | Your profile | Plain-text experience (max 1500 characters) so the suggested reply talks about what you actually did |
 | Today's context | Per-meeting notes (max 1500 characters) so the direct answer can also answer knowledge questions; editable mid-session from the side panel |
 | Conversation language | English (coach + translation) or Spanish (professional support: multilingual model, Spanish suggestions, communication-coach report); in the side panel, per session |
-| Coach models | Groq (`gpt-oss-20b/120b`, **free**) and Claude (`haiku-4-5`, `sonnet-5`, `opus-5`, **paid**), selectable separately |
+| Coach model | One shared model for the suggested reply and the report: Groq (`gpt-oss-20b/120b`, **free**) or Claude (`haiku-4-5`, `sonnet-5`, `opus-5`, **paid**) |
 | Shortcuts | `⌘⇧S` start/stop · `⌘⇧E` suggested reply. Change them at `chrome://extensions/shortcuts` |
 
 ## How it works
@@ -272,9 +273,10 @@ Files: `background.js` (coordination, shortcut, message relay and storage), `off
 (capture, queue and coach: the heart of it, alive even with no interface open), `capture.js`
 (opening the stream by id type), `segmenter.js` (VAD, WAV and the provisional preview lane), `worker.js` (local Whisper),
 `live.js` (provisional transcription via on-device Web Speech), `translate.js` (Chrome's built-in
-translator), `coach.js` (Groq and Anthropic adapters + prompts), `overlay.js` (in-page
-interface), `sidepanel.*` (full view), `report.*` (report), `setup.*` (permissions and settings),
-`vendor/` (transformers.js + ONNX Runtime, bundled to satisfy MV3's CSP).
+translator), `coach.js` (Groq and Anthropic adapters + the reply and report prompts),
+`phrasebook.js` (the curated chip catalogue and notes, no provider involved), `overlay.js`
+(in-page interface), `sidepanel.*` (full view), `report.*` (report), `setup.*` (permissions and
+settings), `vendor/` (transformers.js + ONNX Runtime, bundled to satisfy MV3's CSP).
 
 One detail that shapes the design: **an offscreen document only has access to `chrome.runtime`**,
 not `chrome.storage`. That is why all of its storage goes through the service worker

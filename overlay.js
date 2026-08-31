@@ -94,7 +94,7 @@
     }
     .head button:hover { color: #e8eaed; }
 
-    /* Only the turns scroll: the coach (chips, openers, reply) stays pinned, or
+    /* Only the turns scroll: the coach (phrases, notes, reply) stays pinned, or
        a growing conversation pushes the help out of sight — exactly when the
        learner needs it. */
     .body { padding: 9px 10px; flex: 1; display: flex; flex-direction: column; overflow: hidden; min-height: 0; }
@@ -104,15 +104,28 @@
     .live-note { color: #d9a441; font-size: 10.5px; margin: -4px 0 7px; line-height: 1.35; }
     .card.idle .live-note { display: none; }
 
-    .chips { display: flex; flex-wrap: wrap; gap: 5px; }
     .chip {
       background: #22262c; border: 1px solid #2c3038; border-radius: 999px;
       padding: 3px 9px; font-size: 12px;
     }
     .chip b { font-weight: 600; }
     .chip i { color: #9aa0a6; font-style: normal; font-size: 11px; }
-    .nudge { color: #9aa0a6; font-style: italic; font-size: 11.5px; margin: 7px 0 0; }
-    .nudge:empty { display: none; }
+
+    /* Capped like .reply below, and for the same reason the .body comment gives:
+       the lanes are pinned, .turns is the only thing that can shrink, and its
+       automatic minimum is 0. Unbounded lanes would collapse the conversation and
+       then be clipped by .body's overflow:hidden with nothing left to scroll. */
+    .phrases { display: flex; flex-wrap: wrap; gap: 5px;
+      max-height: 25%; min-height: 0; overflow-y: auto; }
+    .notes { display: flex; flex-direction: column; gap: 3px; margin-top: 6px;
+      max-height: 30%; min-height: 0; overflow-y: auto; }
+    .note-head {
+      width: 100%; text-align: left; background: none; border: 0; cursor: pointer;
+      color: #e8eaed; font: inherit; font-size: 12px; padding: 2px 0;
+    }
+    .note-body { margin: 2px 0 5px 14px; white-space: pre-wrap; font-size: 11.5px; color: #bdc1c6; }
+    .notes:empty, .phrases:empty { display: none; }
+    .card.idle .phrases, .card.idle .notes { display: none; }
 
     /* Hidden by a class, not :empty — the box always holds its status and group
        skeleton, so :empty never matches and an idle blue strip would show. */
@@ -144,12 +157,6 @@
     .reply-item b { font-weight: 600; }
     .reply-item i { display: block; color: #9aa0a6; font-size: 11px; margin-top: 2px; }
 
-    /* The openers pinned above the conversation render as one wrapping chip
-       row: full-width two-line rows would eat the height the turns need. */
-    .hint-openers .reply-list { flex-direction: row; flex-wrap: wrap; }
-    .hint-openers .reply-item { width: auto; border-radius: 999px; padding: 3px 10px; font-size: 12px; }
-    .hint-openers .reply-item i { display: inline; margin: 0 0 0 5px; }
-
     /* One answer, read out loud at a glance: big and calm, only the key term
        bold. The study ideas stay small — they are for after the conversation. */
     .reply-group.answer .reply-item { font-size: 15px; line-height: 1.5; }
@@ -157,8 +164,10 @@
     .reply-group.ideas .reply-item { font-size: 11.5px; opacity: .9; }
     .reply-group.ideas .reply-item b { font-weight: 400; }
 
+    /* A floor, not just a scrollbar: without it the lanes and the reply would take
+       everything and the conversation would be laid out at zero height. */
     .turns { margin-top: 10px; display: flex; flex-direction: column; gap: 5px;
-      flex: 1; min-height: 0; overflow-y: auto; }
+      flex: 1; min-height: 72px; overflow-y: auto; }
     .turn { font-size: 12px; padding: 5px 8px; border-radius: 8px; background: #24272d; }
     .turn.me { background: #1e3a5f; }
     .turn span { display: block; font-size: 10px; color: #9aa0a6; }
@@ -176,7 +185,7 @@
     .foot button.ghost { background: #22262c; color: #e8eaed; border: 1px solid #2c3038; font-weight: 400; }
     .card.idle .reply-btn, .card.idle .stop-btn { display: none; }
     .card:not(.idle) .start-btn { display: none; }
-    .card.idle .turns, .card.idle .chips, .card.idle .nudge, .card.idle .reply, .card.idle .hint-openers { display: none; }
+    .card.idle .turns, .card.idle .reply { display: none; }
   `;
 
   const host = document.createElement('div');
@@ -197,11 +206,8 @@
       <div class="body">
         <p class="status">Grabando…</p>
         <p class="live-note" hidden></p>
-        <div class="chips"></div>
-        <p class="nudge"></p>
-        <div class="hint-openers reply-group" hidden>
-          <span class="reply-label">Para arrancar</span><div class="reply-list"></div>
-        </div>
+        <div class="phrases"></div>
+        <div class="notes"></div>
         <div class="turns"></div>
         <div class="partial" hidden><span class="partial-en"></span><span class="es"></span></div>
         <div class="reply">
@@ -269,7 +275,7 @@
   }
 
   // idle: just the pill (or the collapsed card, to start).
-  // running: the full card with chips, turns and reply.
+  // running: the full card with phrases, turns and reply.
   function setMode(mode) {
     const running = mode === 'running';
     card.classList.toggle('idle', !running);
@@ -432,29 +438,43 @@
     $('.reply').classList.toggle('show', !!(aviso || answer.length || ideas.length));
   }
 
-  function showHints({ words = [], nudge = '', openers = [] }) {
-    // The openers ride on the same HINTS round: connectors to start answering
-    // appear by themselves after each turn, in their own slot. Rebuilt
-    // unconditionally so an error round (which carries no openers) clears the
-    // previous turn's instead of leaving them on screen looking current — and
-    // never in the reply box, whose openers/ideas pairing belongs to ⌘⇧E.
-    fillGroup($('.hint-openers'), openers);
-    const chips = $('.chips');
-    chips.innerHTML = '';
-    for (const w of words) {
+  function showChips({ phrases = [], notes = [] }) {
+    const lane = $('.phrases');
+    lane.textContent = '';
+    for (const p of phrases) {
       const chip = document.createElement('span');
       chip.className = 'chip';
       const en = document.createElement('b');
-      en.textContent = w.en;
+      en.textContent = p.en;
       chip.append(en);
-      if (w.es) {
+      if (p.es) {
         const es = document.createElement('i');
-        es.textContent = ' · ' + w.es;
+        es.textContent = ' · ' + p.es;
         chip.append(es);
       }
-      chips.append(chip);
+      lane.append(chip);
     }
-    $('.nudge').textContent = nudge || '';
+
+    const list = $('.notes');
+    list.textContent = '';
+    for (const n of notes) {
+      const item = document.createElement('div');
+      item.className = 'note';
+      const head = document.createElement('button');
+      head.className = 'note-head';
+      head.type = 'button';
+      head.textContent = (n.open ? '▾ ' : '▸ ') + (n.title || 'Nota');
+      const body = document.createElement('p');
+      body.className = 'note-body';
+      body.textContent = n.body;
+      body.hidden = !n.open;
+      // The content script has no chrome.storage: the toggle goes through the router.
+      head.addEventListener('click', () => {
+        chrome.runtime.sendMessage({ type: 'TOGGLE_NOTE', id: n.id }).catch(() => {});
+      });
+      item.append(head, body);
+      list.append(item);
+    }
   }
 
   // --- dragging the card ---------------------------------------------------
@@ -549,7 +569,7 @@
         break;
       case 'STATUS': if (msg.show) show(true); setStatus(msg.text, msg.kind); break;
       case 'SEGMENT': show(true); addTurn(msg.entry); break;
-      case 'HINTS': show(true); showHints(msg); break;
+      case 'COACH_CHIPS': showChips(msg); break;
       case 'REPLY': show(true); showReply(msg); break;
       case 'QUEUE': if (msg.pending > 0) setStatus(`Transcribiendo… (${msg.pending})`); break;
       case 'PARTIAL': if (msg.text) show(true); showPartial(msg.text); break;
@@ -594,7 +614,7 @@
       setStatus('Grabando…', 'ok');
       showLiveNote(st.live);
       for (const t of st.turns || []) addTurn(t);
-      if (st.hints) showHints(st.hints);
+      if (st.chips) showChips(st.chips);
     })
     .catch(() => {});
 })();

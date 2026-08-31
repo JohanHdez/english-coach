@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseReply, parseHints, turnsToText, contextBlock, CONTEXT_MAX_CHARS } from './coach.js';
+import { parseReply, turnsToText, contextBlock, CONTEXT_MAX_CHARS, askReply, askReport } from './coach.js';
 
 test('parseReply returns one speakable answer and two study ideas, cleaned', () => {
   const raw = JSON.stringify({
@@ -57,23 +57,6 @@ test('turnsToText always keeps at least the last turn, even over budget', () => 
   assert.ok(turnsToText(turns, 10, 5).includes('tiny budget'));
 });
 
-test('parseHints returns capped words, cleaned openers and the nudge', () => {
-  const raw = JSON.stringify({
-    words: [{ en: 'w1', es: '' }, { en: 'w2', es: '' }, { en: 'w3', es: '' }, { en: 'w4', es: '' }, { en: 'w5', es: '' }],
-    openers: [{ en: '"Well, the way I see it,"', es: 'bueno' }, { en: '', es: 'vacío' }],
-    nudge: 'directo y corto',
-  });
-  const out = parseHints(raw);
-  assert.equal(out.words.length, 4);
-  assert.equal(out.openers.length, 1);
-  assert.equal(out.openers[0].en, 'Well, the way I see it,');
-  assert.equal(out.nudge, 'directo y corto');
-});
-
-test('parseHints rejects a reply without words', () => {
-  assert.throws(() => parseHints(JSON.stringify({ openers: [], nudge: '' })));
-});
-
 test('contextBlock is empty when there are no notes', () => {
   assert.equal(contextBlock({}), '');
   assert.equal(contextBlock({ sessionContext: '   ' }), '');
@@ -85,4 +68,59 @@ test('contextBlock carries the notes, capped at the limit', () => {
   const long = contextBlock({ sessionContext: 'x'.repeat(CONTEXT_MAX_CHARS + 500) });
   assert.ok(!long.includes('x'.repeat(CONTEXT_MAX_CHARS + 1)));
   assert.ok(long.includes('x'.repeat(CONTEXT_MAX_CHARS)));
+});
+
+// Stub for the Groq endpoint, shared by the tests below: captures the request
+// body instead of hitting the network.
+function stubGroq(capture, content) {
+  const original = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    capture.url = url;
+    capture.body = JSON.parse(init.body);
+    return { ok: true, status: 200, json: async () => ({ choices: [{ message: { content } }] }) };
+  };
+  return () => { globalThis.fetch = original; };
+}
+
+const REPLY_SETTINGS = {
+  reportProvider: 'groq',
+  reportModel: 'openai/gpt-oss-120b',
+  groqKey: 'gsk_test_key_for_unit_tests',
+  level: 'B1-B2',
+  situation: 'conversación de trabajo en inglés',
+  lang: 'en',
+};
+const REPLY_JSON = JSON.stringify({
+  answer: [{ en: 'It depends on the load.', es: 'depende de la carga' }],
+  ideas: [{ en: 'idea', es: 'idea' }],
+});
+
+test('askReply clips a repetition-loop turn out of its prompt', async () => {
+  const loop = { speaker: 'me', text: 'be able to '.repeat(400) };
+  const seen = {};
+  const restore = stubGroq(seen, REPLY_JSON);
+  try {
+    await askReply({
+      turns: [{ speaker: 'them', text: 'How is the migration going?' }, loop],
+      settings: REPLY_SETTINGS,
+    });
+  } finally { restore(); }
+  const user = seen.body.messages.find((m) => m.role === 'user').content;
+  assert.ok(!user.includes('be able to '.repeat(50)), 'the repetition loop reached the prompt whole');
+  assert.ok(user.length < 2500, `reply prompt grew to ${user.length} chars`);
+});
+
+test('askReport marks the transcript partial when a turn is clipped, even if none is dropped', async () => {
+  // Short enough that no turn is dropped for REPORT_MAX_CHARS, long enough that this
+  // one turn alone crosses TURN_MAX_CHARS and gets truncated by clip().
+  const loop = { speaker: 'me', text: 'be able to '.repeat(60) };
+  const turns = [{ speaker: 'them', text: 'How did the migration go?' }, loop];
+  const seen = {};
+  const restore = stubGroq(seen, 'Informe de prueba.');
+  try {
+    await askReport({ turns, settings: REPLY_SETTINGS });
+  } finally { restore(); }
+  const user = seen.body.messages.find((m) => m.role === 'user').content;
+  assert.ok(!user.includes('Transcripción completa'), 'a clipped turn is reported as a complete transcript');
+  assert.ok(user.includes('sólo la parte final de la conversación'), 'a clipped turn should mark the transcript as partial');
 });

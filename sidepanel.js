@@ -1,6 +1,7 @@
 import { DEFAULT_COACH, CONTEXT_MAX_CHARS } from './coach.js';
 import { toSpanish } from './translate.js';
 import { installLive } from './live.js';
+import { resolveChips, toggleNoteOpen } from './phrasebook.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -9,7 +10,8 @@ const els = {
   lang: $('lang'),
   themSource: $('themSource'), themDevice: $('themDevice'), deviceField: $('deviceField'),
   captureMic: $('captureMic'), settings: $('settings'), sessionContext: $('sessionContext'),
-  coach: $('coach'), chips: $('chips'), nudge: $('nudge'), hintOpeners: $('hintOpeners'), askReply: $('askReply'),
+  coach: $('coach'), askReply: $('askReply'),
+  phrases: $('phrases'), notes: $('notes'),
   replyBox: $('replyBox'), replyStatus: $('replyStatus'),
   replyAnswer: $('replyAnswer'), replyIdeas: $('replyIdeas'),
   report: $('report'), analyze: $('analyze'), download: $('download'), clear: $('clear'),
@@ -88,30 +90,67 @@ function setRunning(v) {
   els.themSource.disabled = v;
   els.themDevice.disabled = v;
   els.captureMic.disabled = v;
-  els.coach.hidden = !(v && settings.liveCoach);
+  syncCoach();
+}
+
+// The two halves of the coach answer to different things. The lanes are settings,
+// so they show with no session at all; resolveChips already empties them when
+// liveCoach is off, which is why their visibility is read off their own content
+// instead of a second copy of that rule. The reply needs a running session —
+// exactly how the overlay gates it on .card.idle — so the panel, the floating
+// window and the page overlay agree about what is on screen when.
+function syncCoach() {
+  const lanes = els.phrases.childElementCount > 0 || els.notes.childElementCount > 0;
+  els.askReply.hidden = !running;
+  if (!running) els.replyBox.hidden = true;
+  els.coach.hidden = !(lanes || running);
 }
 
 // ------------------------------------------------------------------- coach
 
-function showHints({ words = [], nudge = '', openers = [] }) {
-  // Unconditional rebuild in a slot of their own: an empty round clears stale
-  // openers, and the reply box's ⌘⇧E openers/ideas pairing is never touched.
-  fillGroup(els.hintOpeners, openers);
-  els.chips.innerHTML = '';
-  for (const w of words) {
+// Phrases need no interaction: they are there to be glanced at mid-sentence.
+// Notes are collapsed but remember their state, so the learner opens "Mi daily"
+// before the meeting and never has to click while the other person waits.
+function showChips({ phrases = [], notes = [] }) {
+  els.phrases.textContent = '';
+  for (const p of phrases) {
     const chip = document.createElement('span');
     chip.className = 'chip';
     const en = document.createElement('b');
-    en.textContent = w.en;
+    en.textContent = p.en;
     chip.append(en);
-    if (w.es) {
+    if (p.es) {
       const es = document.createElement('span');
-      es.textContent = ' · ' + w.es;
+      es.textContent = ' · ' + p.es;
       chip.append(es);
     }
-    els.chips.append(chip);
+    els.phrases.append(chip);
   }
-  els.nudge.textContent = nudge || '';
+
+  els.notes.textContent = '';
+  for (const n of notes) {
+    const item = document.createElement('div');
+    item.className = 'note';
+    const head = document.createElement('button');
+    head.className = 'note-head';
+    head.type = 'button';
+    head.textContent = (n.open ? '▾ ' : '▸ ') + (n.title || 'Nota');
+    const body = document.createElement('p');
+    body.className = 'note-body';
+    body.textContent = n.body;
+    body.hidden = !n.open;
+    head.addEventListener('click', () => toggleNote(n.id));
+    item.append(head, body);
+    els.notes.append(item);
+  }
+  syncCoach();
+}
+
+async function toggleNote(id) {
+  const { settings: stored = {} } = await chrome.storage.local.get('settings');
+  await chrome.storage.local.set({ settings: toggleNoteOpen(stored, id) });
+  // No re-render here: the write trips storage.onChanged in background.js, which
+  // re-broadcasts COACH_CHIPS to all three views at once.
 }
 
 // What the learner loses when Chrome's on-device recognition is missing depends
@@ -232,13 +271,15 @@ function fillGroup(box, items, rich = false) {
 }
 
 function showReply({ answer = [], ideas = [], pending = false, error = '' } = {}) {
-  els.coach.hidden = false;
-  els.replyBox.hidden = false;
   const aviso = pending ? 'Pensando…' : error;
   els.replyStatus.textContent = aviso;
   els.replyStatus.hidden = !aviso;
   fillGroup(els.replyAnswer, pending || error ? [] : answer, true);
   fillGroup(els.replyIdeas, pending || error ? [] : ideas);
+  els.replyBox.hidden = false;
+  // syncCoach has the last word: a reply that lands after the session ended must
+  // not reopen the section, or the panel would show what the overlay hides.
+  syncCoach();
 }
 
 // The heavy lifting lives in the offscreen document: the panel only asks and paints.
@@ -294,6 +335,8 @@ async function init() {
   const { settings: stored = {}, transcript = [], lastError } =
     await chrome.storage.local.get(['settings', 'transcript', 'lastError']);
   settings = { ...DEFAULT_COACH, ...stored };
+  // First paint without waiting for a broadcast; COACH_CHIPS keeps it live afterwards.
+  showChips(resolveChips(settings));
   els.lang.value = settings.lang || 'en';
   els.themSource.value = settings.themSource || 'tab';
   els.captureMic.checked = settings.captureMic !== false;
@@ -345,8 +388,6 @@ els.toggle.addEventListener('click', async () => {
   if (res && res.ok) {
     setRunning(true);
     setStatus('Grabando…', 'ok');
-    els.chips.innerHTML = '';
-    els.nudge.textContent = '';
     els.replyBox.hidden = true;
   } else {
     setStatus(res?.error || 'No se pudo iniciar.', 'error');
@@ -378,8 +419,6 @@ els.clear.addEventListener('click', async () => {
   entries = [];
   await chrome.storage.local.set({ transcript: [] });
   render();
-  els.chips.innerHTML = '';
-  els.nudge.textContent = '';
   els.replyBox.hidden = true;
   setStatus('Transcripción borrada.');
 });
@@ -399,7 +438,7 @@ chrome.runtime.onMessage.addListener((msg) => {
     if (msg.state !== 'available') showPartial('');
     showLiveNote(msg);
   }
-  else if (msg.type === 'HINTS') showHints(msg);
+  else if (msg.type === 'COACH_CHIPS') showChips(msg);
   else if (msg.type === 'REPLY') showReply(msg);
   else if (msg.type === 'STATUS') setStatus(msg.text, msg.kind);
   else if (msg.type === 'RUNNING') { setRunning(msg.running); if (!msg.running) showPartial(''); }

@@ -1,6 +1,6 @@
 ---
 name: test-author
-description: Writes and repairs Node unit tests for the dependency-free modules — segmenter.js, capture.js, coach.js, report.js. Use when adding logic to those files, when a bug is reproducible from pure inputs, or when asked to add test coverage.
+description: Writes and repairs Node unit tests for the dependency-free modules — segmenter.js, capture.js, coach.js, phrasebook.js, report.js. Use when adding logic to those files, when a bug is reproducible from pure inputs, or when asked to add test coverage.
 model: sonnet
 tools: Read, Write, Edit, Grep, Glob, Bash
 ---
@@ -10,13 +10,14 @@ tests use `node:test` and `node:assert/strict` and run with zero installed depen
 
 ## What is testable
 
-Four modules import no `chrome.*` and run unmodified in Node:
+Five modules import no `chrome.*` and run unmodified in Node:
 
 | Module | Surface | Side effects are injected as |
 |---|---|---|
 | `segmenter.js` | `Segmenter`, `floatToWav`, `isJunk` | `now` constructor argument |
 | `capture.js` | `captureConstraints`, `attemptsFor`, `openCaptureStream` | `gum` parameter |
 | `coach.js` | `parseJsonLoose`, `groqBaseOf`, `anthropicBaseOf`, `PROVIDERS`, `DEFAULT_COACH` | `globalThis.fetch` |
+| `phrasebook.js` | `CATALOGUE`, `resolvePhrases`, `resolveNotes`, `resolveChips` | none — pure functions of a `settings` object |
 | `report.js` | `renderMarkdown` | guarded so importing does not touch the DOM |
 
 `background.js`, `offscreen.js`, `overlay.js`, `sidepanel.js` and `setup.js` are not unit

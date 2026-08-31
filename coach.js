@@ -1,4 +1,5 @@
-// Coaching layer: live suggestions, full reply, and the closing report.
+// Coaching layer: the suggested reply on demand and the closing report. The live
+// chips and notes come from phrasebook.js and call no model at all.
 // Two interchangeable providers: Groq (OpenAI-compatible) and Claude (Anthropic).
 
 export const PROVIDERS = {
@@ -18,8 +19,6 @@ export const PROVIDERS = {
 
 export const DEFAULT_COACH = {
   liveCoach: true,
-  liveProvider: 'groq',
-  liveModel: 'openai/gpt-oss-20b',
   reportProvider: 'groq',
   reportModel: 'openai/gpt-oss-120b',
   autoReport: true,
@@ -34,8 +33,6 @@ export const DEFAULT_COACH = {
 // minute, and it stops a whole six-page CV pasted in from blowing through it.
 export const PROFILE_MAX_CHARS = 1500;
 
-// Deliberately NOT used in askHints: the chips run every six seconds, and repeating
-// the profile in every round exhausts the tokens-per-minute limit.
 function profileBlock(settings) {
   const texto = (settings.profile || '').trim().slice(0, PROFILE_MAX_CHARS);
   if (!texto) return '';
@@ -43,7 +40,7 @@ function profileBlock(settings) {
 }
 
 // Per-meeting notes ("entrevista técnica de Angular: signals, RxJS…"). Same
-// token-budget rule as the profile: reply and report only, never the chips.
+// token-budget rule as the profile.
 export const CONTEXT_MAX_CHARS = 1500;
 
 export function contextBlock(settings) {
@@ -70,7 +67,7 @@ export const anthropicBaseOf = (s = {}) => (s.anthropicBase || ANTHROPIC_DEFAULT
 // Only the gpt-oss models accept json_schema with constrained decoding, the one
 // mode that cannot return invalid JSON. json_object validates after generation, and
 // these models leak reasoning tokens into the output: Groq rejects it with
-// json_validate_failed and the whole round of chips is lost.
+// json_validate_failed and the suggested reply is lost.
 const SUPPORTS_JSON_SCHEMA = /^openai\/gpt-oss/;
 
 function groqResponseFormat(model, schema) {
@@ -179,10 +176,19 @@ export function parseJsonLoose(text) {
 // Groq's free tier allows 8000 tokens per minute across input and output. A report
 // carrying the whole transcript eats that and returns 429, so the oldest turns are
 // trimmed until it fits. Four characters per token is the usual rule of thumb.
-export function turnsToText(turns, limit = 10, maxChars = Infinity) {
+// A Whisper repetition loop ("be able to" two hundred times) arrives as ONE segment,
+// which MERGE_MAX_CHARS does not bound — that caps folding, not a single transcription.
+// Left whole, one such turn is thousands of characters and dominates every prompt it
+// reaches, so each turn contributes at most maxTurnChars.
+const clip = (text, max) => {
+  const t = String(text ?? '');
+  return t.length <= max ? t : `${t.slice(0, max)}…`;
+};
+
+export function turnsToText(turns, limit = 10, maxChars = Infinity, maxTurnChars = Infinity) {
   const lines = turns
     .slice(-limit)
-    .map((t) => `${t.speaker === 'me' ? 'LEARNER' : 'OTHER'}: ${t.text}`);
+    .map((t) => `${t.speaker === 'me' ? 'LEARNER' : 'OTHER'}: ${clip(t.text, maxTurnChars)}`);
   if (maxChars === Infinity) return lines.join('\n');
 
   const kept = [];
@@ -198,7 +204,20 @@ export function turnsToText(turns, limit = 10, maxChars = Infinity) {
 // Leaves room for the system prompt and the 2800 output tokens within the free minute.
 const REPORT_MAX_CHARS = 12000;
 
-// Spanish-session override, appended to the live prompts: same structure and
+// A Whisper repetition loop is one segment of thousands of characters; MERGE_MAX_CHARS
+// bounds folding, not a single transcription. Without a per-turn cap, turnsToText's
+// "keep at least the last turn" rule passes the whole loop through.
+const TURN_MAX_CHARS = 400;
+
+// Every call that constrains the answer to a schema shares this budget. gpt-oss models
+// spend reasoning tokens from max_completion_tokens BEFORE they write the JSON, so a
+// tight cap truncates the object mid-key and Groq rejects the whole call with 400
+// json_validate_failed. 1200 is the figure that stopped it for the reply in v1.17.1;
+// the two live-suggestion calls that kept the old cap both hit the same 400 in
+// production, and they went away with the live model layer rather than being retuned.
+const JSON_BUDGET = 1200;
+
+// Spanish-session override, appended to the reply prompt: same structure and
 // fields, but the phrases to say are Spanish and a gloss is pointless for a
 // native speaker — there the coach is professional support, not language help.
 const SPANISH_MODE = `
@@ -206,102 +225,11 @@ const SPANISH_MODE = `
 IMPORTANT OVERRIDE: this conversation is in SPANISH, the learner's NATIVE language. They need
 professional support (what to say, how to phrase it well in a work setting), not language help.
 Every "en" field must contain the SPANISH phrase to say, in professional spoken register.
-Return "es" as an empty string. "nudge" stays in Spanish.`;
+Return "es" as an empty string.`;
 
 const langMode = (settings) => (settings.lang === 'es' ? SPANISH_MODE : '');
 
-// --- 1. Vocabulary chips after each of the other speaker's turns --------------
-
-const HINT_SYSTEM = `You help a Spanish-speaking professional keep up in a live English conversation.
-Given the recent turns, return:
-"words": 3 or 4 short items the learner is likely to need RIGHT NOW to answer — useful
-collocations, phrasal verbs or connectors, not full sentences, 1 to 4 words each.
-"openers": 2 or 3 short natural ways to BEGIN answering what was just said — connectors or
-framing phrases, 2 to 6 words each, spoken register.
-"nudge": one very short hint (max 8 words, in Spanish) about how to steer the answer.
-Each words/openers item has "en" and "es" (Spanish gloss, max 5 words).
-Reply ONLY with JSON: {"words":[{"en":"...","es":"..."}],"openers":[{"en":"...","es":"..."}],"nudge":"..."}`;
-
-const HINT_SCHEMA = {
-  type: 'object',
-  properties: {
-    words: {
-      type: 'array',
-      items: {
-        type: 'object',
-        properties: { en: { type: 'string' }, es: { type: 'string' } },
-        required: ['en', 'es'],
-        additionalProperties: false,
-      },
-    },
-    openers: {
-      type: 'array',
-      items: {
-        type: 'object',
-        properties: { en: { type: 'string' }, es: { type: 'string' } },
-        required: ['en', 'es'],
-        additionalProperties: false,
-      },
-    },
-    nudge: { type: 'string' },
-  },
-  required: ['words', 'openers', 'nudge'],
-  additionalProperties: false,
-};
-
-// Shared by the live hints and the pre-conversation starter: both broadcast the
-// same HINTS shape. Pure so Node can test it.
-export function parseHints(raw) {
-  const parsed = parseJsonLoose(raw);
-  if (!parsed || !Array.isArray(parsed.words)) throw new CoachError('Respuesta de sugerencias no válida.');
-  return {
-    words: parsed.words.filter((w) => w && w.en).slice(0, 4),
-    openers: cleanItems(parsed.openers).slice(0, 3),
-    nudge: typeof parsed.nudge === 'string' ? parsed.nudge : '',
-  };
-}
-
-export async function askHints({ turns, settings }) {
-  const raw = await ask({
-    provider: settings.liveProvider,
-    model: settings.liveModel,
-    keys: settings,
-    system: HINT_SYSTEM + langMode(settings),
-    user: `Learner level: ${settings.level}. Context: ${settings.situation}.\n\nConversation so far:\n${turnsToText(turns, 8)}`,
-    maxTokens: 700,
-    schema: HINT_SCHEMA,
-  });
-  return parseHints(raw);
-}
-
-// --- 1b. Starter kit before the first turn ------------------------------------
-
-const STARTER_SYSTEM = `You help a Spanish-speaking professional get ready for an English
-conversation that is about to start. From the situation and their notes, return:
-"words": 4 short items they will likely need in THIS topic — connectors, collocations or
-phrasal verbs that make them sound natural, 1 to 4 words each.
-"openers": 2 or 3 short natural ways to begin an answer in this situation, 2 to 6 words each,
-spoken register.
-"nudge": one very short tip (max 8 words, in Spanish) to sound natural here.
-Each words/openers item has "en" and "es" (Spanish gloss, max 5 words).
-Reply ONLY with JSON: {"words":[{"en":"...","es":"..."}],"openers":[{"en":"...","es":"..."}],"nudge":"..."}`;
-
-// One call per session (and per mid-session context edit), on the cheap live
-// model: it primes the chips before the other person has said anything.
-export async function askStarter({ settings }) {
-  const raw = await ask({
-    provider: settings.liveProvider,
-    model: settings.liveModel,
-    keys: settings,
-    system: STARTER_SYSTEM + langMode(settings),
-    user: `Learner level: ${settings.level}. Situation: ${settings.situation}.${contextBlock(settings)}`,
-    maxTokens: 700,
-    schema: HINT_SCHEMA,
-  });
-  return parseHints(raw);
-}
-
-// --- 2. Full reply on demand (keyboard shortcut) -----------------------------
+// --- 1. Full reply on demand (keyboard shortcut) -----------------------------
 
 const REPLY_SYSTEM = `You are helping a Spanish-speaking professional answer in a live English
 conversation. They will read your answer OUT LOUD while the other person waits, so it must be
@@ -374,20 +302,18 @@ export async function askReply({ turns, settings }) {
     user: `Learner level: ${settings.level}. Context: ${settings.situation}.`
       + `${profileBlock(settings)}${contextBlock(settings)}`
       // Capped by characters, not turns: soft cuts split one long question into
-      // many small segments, so a turn count could drop the question itself. The
-      // cap keeps it whole while bounding cost and latency.
-      + `\n\nConversation so far:\n${turnsToText(turns, 10, 1200)}`
+      // many small segments, so a turn count could drop the question itself. Below
+      // TURN_MAX_CHARS a turn stays whole; past it, clip() truncates mid-content so a
+      // single repetition loop can't dominate the budget.
+      + `\n\nConversation so far:\n${turnsToText(turns, 10, 1200, TURN_MAX_CHARS)}`
       + `\n\nAnswer the other person's last turn for the learner: one speakable answer, then two study ideas.`,
-    // The JSON itself is ~200 tokens, but gpt-oss models spend reasoning tokens
-    // from the same budget BEFORE writing it: a tight cap truncates the JSON and
-    // Groq rejects the call with 400 json_validate_failed.
-    maxTokens: 1200,
+    maxTokens: JSON_BUDGET,
     schema: REPLY_SCHEMA,
   });
   return parseReply(raw);
 }
 
-// --- 3. Closing report -------------------------------------------------------
+// --- 2. Closing report -------------------------------------------------------
 
 const REPORT_SYSTEM = `Eres un profesor de inglés que analiza una conversación real de un hispanohablante.
 "LEARNER" es tu alumno; "OTHER" es la otra persona. El «Resumen de la reunión» usa TODA la
@@ -469,8 +395,11 @@ en la próxima conversación para que cada una mejore la anterior.`;
 export async function askReport({ turns, settings }) {
   const mine = turns.filter((t) => t.speaker === 'me').length;
   if (mine === 0) throw new CoachError('No hay intervenciones tuyas para analizar.');
-  const texto = turnsToText(turns, 400, REPORT_MAX_CHARS);
-  const recortada = texto.split('\n').length < turns.length;
+  const texto = turnsToText(turns, 400, REPORT_MAX_CHARS, TURN_MAX_CHARS);
+  // A turn can be clipped mid-content by TURN_MAX_CHARS without ever being dropped, so
+  // a shrinking line count alone misses it — check the raw turns for one over the cap too.
+  const recortada = texto.split('\n').length < turns.length
+    || turns.some((t) => String(t.text ?? '').length > TURN_MAX_CHARS);
   return ask({
     provider: settings.reportProvider,
     model: settings.reportModel,

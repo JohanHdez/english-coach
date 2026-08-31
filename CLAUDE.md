@@ -109,10 +109,11 @@ security control, not formatting.
 **Errors.** Prefix user-visible failures with the stage that produced them: `[offscreen]`,
 `[captura]`, `[tabs.query]`. Chrome's own messages ("Invalid state") identify nothing.
 
-**Pure logic stays pure.** `segmenter.js`, `capture.js`, `coach.js` and `report.js` import no
-`chrome.*` and take their side effects as injected parameters (`Segmenter(…, now)`,
-`openCaptureStream(…, gum)`). That is deliberate: they import and run unmodified in Node, which
-is the only way any of this is testable. Keep new logic on that side of the line.
+**Pure logic stays pure.** `segmenter.js`, `capture.js`, `coach.js`, `phrasebook.js` and
+`report.js` import no `chrome.*` and take their side effects as injected parameters
+(`Segmenter(…, now)`, `openCaptureStream(…, gum)`). That is deliberate: they import and run
+unmodified in Node, which is the only way any of this is testable. Keep new logic on that side of
+the line.
 
 **Secrets.** API keys live in `chrome.storage.local` and nowhere else. Never log them, never put
 one in a URL or a query string, never send one to a host the user did not configure.
@@ -122,10 +123,11 @@ and everything under `.claude/`.
 
 The **product** is Spanish, and that is not an inconsistency to clean up. UI strings and
 user-facing errors are Spanish because the extension teaches English *to Spanish speakers* — the
-nudges, the chips and the report are read in the learner's language, and that is the feature.
-Coach prompts follow the same rule by output: English system prompts for the live hints (the
-model reasons in English about English), Spanish for the report (the learner reads it). Never
-"fix" a Spanish UI string into English.
+chips, the notes and the report are read in the learner's language, and that is the feature.
+Coach prompts follow the same rule by output: an English system prompt for the suggested reply
+(the model reasons in English about English), Spanish for the report (the learner reads it). The
+chips themselves are a curated phrasebook (`phrasebook.js`), not model output, so no prompt
+governs them. Never "fix" a Spanish UI string into English.
 
 ## Verification
 
@@ -159,4 +161,5 @@ Skills: `/preflight`, `/add-provider`, `/release`.
   is still requested. Preflight reports both.
 - `host_permissions` covers every site; only `huggingface.co`, `api.groq.com` and
   `api.anthropic.com` are actually fetched.
-- No unit tests exist yet, despite four modules being written to be testable.
+- `capture.js` and `report.js` are written to be testable but have no tests; `coach.js`,
+  `segmenter.js`, `worker.js` and `phrasebook.js` carry the 59 that exist.

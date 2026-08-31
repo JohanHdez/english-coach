@@ -3,15 +3,9 @@
 
 import { Segmenter, floatToWav, isJunk, foldIntoTranscript, SR } from './segmenter.js';
 import { openCaptureStream } from './capture.js';
-import { askHints, askStarter, askReply, askReport, groqBaseOf, redact, resolveProvider, PROVIDERS, DEFAULT_COACH } from './coach.js';
+import { askReply, askReport, groqBaseOf, redact, resolveProvider, PROVIDERS, DEFAULT_COACH } from './coach.js';
 import { startLive, liveAvailability } from './live.js';
 
-const HINT_DEBOUNCE_MS = 1200;   // wait in case the other speaker keeps talking
-// Soft cuts turn a monologue into a stream of 4-6 s turns, each of which
-// schedules hints — the cooldown is what keeps that within Groq's free tier
-// (8000 tokens/min): 12 s allows at most 5 rounds a minute (~5.3k tokens),
-// leaving room for a suggested reply and even the report in the same minute.
-const HINT_COOLDOWN_MS = 12000;
 // A preview has to cost less than the interval that schedules it, or the lane
 // stops paying for itself: on the WASM fallback a single pass can take seconds,
 // and a real segment arriving mid-preview waits for it. Two slow rounds and the
@@ -34,10 +28,6 @@ const state = {
   previewOff: false,
   seq: 0,
   turns: [],
-  hintTimer: null,
-  hintBusy: false,
-  lastHintAt: 0,
-  starterBusy: false,
   replyBusy: false,
   live: null,
   liveTrack: null,
@@ -80,7 +70,7 @@ async function appendTranscript(entry) {
   state.turns = transcript;
   await store.set({ transcript });
   broadcast({ type: 'SEGMENT', entry: shown });
-  if (entry.speaker === 'them') { clearPartial(); scheduleHints(); }
+  if (entry.speaker === 'them') clearPartial();
 }
 
 // Two provisional layers can feed the same line — Web Speech word by word, or a
@@ -98,41 +88,6 @@ function coachSettings() {
 }
 
 const sortedTurns = () => [...state.turns].sort((a, b) => a.t - b.t);
-
-function scheduleHints() {
-  if (!coachSettings().liveCoach || !state.running) return;
-  clearTimeout(state.hintTimer);
-  state.hintTimer = setTimeout(async () => {
-    if (state.hintBusy || Date.now() - state.lastHintAt < HINT_COOLDOWN_MS) return;
-    state.hintBusy = true;
-    try {
-      const hints = await askHints({ turns: sortedTurns(), settings: await ensureSettings() });
-      state.lastHintAt = Date.now();
-      broadcast({ type: 'HINTS', ...hints });
-    } catch (e) {
-      broadcast({ type: 'HINTS', words: [], nudge: 'Coach: ' + (e.message || e) });
-    } finally {
-      state.hintBusy = false;
-    }
-  }, HINT_DEBOUNCE_MS);
-}
-
-// Opening chips built from the session context alone, before the other person
-// has said anything. Fired on start and on a mid-session context edit; once a
-// real hints round has painted (lastHintAt), the starter is stale and yields.
-// Failures stay silent on purpose: the first real hints round surfaces any key
-// or rate-limit problem, and an error toast at every session start would nag.
-async function sendStarter() {
-  if (!state.running || state.starterBusy) return;
-  const settings = await ensureSettings();
-  if (!settings.liveCoach || !(settings.sessionContext || '').trim()) return;
-  state.starterBusy = true;
-  try {
-    const hints = await askStarter({ settings });
-    if (state.running && !state.lastHintAt) broadcast({ type: 'HINTS', ...hints });
-  } catch { /* the real hints round will surface a missing key or a rate limit */ }
-  finally { state.starterBusy = false; }
-}
 
 async function suggestReply() {
   // One request at a time: every click costs Groq tokens, and impatient
@@ -455,7 +410,6 @@ async function start(streamId, settings, streamKind) {
 
   state.running = true;
   broadcast({ type: 'RUNNING', running: true });
-  sendStarter();
   return { ok: true };
 }
 
@@ -536,7 +490,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       if (msg.type === 'START') sendResponse(await start(msg.streamId, msg.settings, msg.streamKind));
       else if (msg.type === 'STOP') sendResponse(await stop());
       else if (msg.type === 'SUGGEST_REPLY') sendResponse(await suggestReply());
-      else if (msg.type === 'CONTEXT_CHANGED') { sendStarter(); sendResponse({ ok: true }); }
       else if (msg.type === 'REPORT') sendResponse(await makeReport(false));
       else if (msg.type === 'STATE') sendResponse({ running: state.running, pending: pendingCount() });
       else sendResponse({ ok: false, error: 'Mensaje desconocido' });
