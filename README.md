@@ -150,7 +150,7 @@ reaches them.
 **Today's context.** Next to the profile there is a per-meeting field — «Contexto de hoy» — for
 the topics of the conversation you are about to have: «entrevista técnica de Angular: signals,
 standalone components, RxJS». With it, when a **knowledge question** lands and you blank on the
-answer, the direct answer teaches you the right one, leaning on your notes plus the model's own
+answer, the direct answer teaches you the right one, leaning on that context plus the model's own
 knowledge of the subject; the biography rule still holds (it never invents your experience). It
 also feeds the report's meeting summary. It lives in Settings and in the side panel, and the
 side panel copy can be edited **mid-session**: the next suggested reply already uses it.
