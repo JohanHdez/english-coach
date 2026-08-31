@@ -94,7 +94,7 @@
     }
     .head button:hover { color: #e8eaed; }
 
-    /* Only the turns scroll: the coach (chips, openers, reply) stays pinned, or
+    /* Only the turns scroll: the coach (phrases, notes, reply) stays pinned, or
        a growing conversation pushes the help out of sight — exactly when the
        learner needs it. */
     .body { padding: 9px 10px; flex: 1; display: flex; flex-direction: column; overflow: hidden; min-height: 0; }
@@ -104,7 +104,6 @@
     .live-note { color: #d9a441; font-size: 10.5px; margin: -4px 0 7px; line-height: 1.35; }
     .card.idle .live-note { display: none; }
 
-    .chips { display: flex; flex-wrap: wrap; gap: 5px; }
     .chip {
       background: #22262c; border: 1px solid #2c3038; border-radius: 999px;
       padding: 3px 9px; font-size: 12px;
@@ -178,7 +177,7 @@
     .foot button.ghost { background: #22262c; color: #e8eaed; border: 1px solid #2c3038; font-weight: 400; }
     .card.idle .reply-btn, .card.idle .stop-btn { display: none; }
     .card:not(.idle) .start-btn { display: none; }
-    .card.idle .turns, .card.idle .chips, .card.idle .reply { display: none; }
+    .card.idle .turns, .card.idle .reply { display: none; }
   `;
 
   const host = document.createElement('div');
@@ -199,7 +198,6 @@
       <div class="body">
         <p class="status">Grabando…</p>
         <p class="live-note" hidden></p>
-        <div class="chips"></div>
         <div class="phrases"></div>
         <div class="notes"></div>
         <div class="turns"></div>
@@ -269,7 +267,7 @@
   }
 
   // idle: just the pill (or the collapsed card, to start).
-  // running: the full card with chips, turns and reply.
+  // running: the full card with phrases, turns and reply.
   function setMode(mode) {
     const running = mode === 'running';
     card.classList.toggle('idle', !running);
