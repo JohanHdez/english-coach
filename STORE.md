@@ -48,7 +48,7 @@ El reconocimiento de voz corre dentro de tu navegador con Whisper. Tu audio no s
 
 GRATIS DE PRINCIPIO A FIN
 
-Sin cuenta, sin suscripción y sin límite de minutos. El coach es opcional y funciona con una API key gratuita que creas en menos de un minuto, sin tarjeta.
+Sin cuenta, sin suscripción y sin límite de minutos. Los chips de frases y las notas no necesitan API key ni conexión. La respuesta sugerida y el informe son opcionales y funcionan con una API key gratuita que creas en menos de un minuto, sin tarjeta.
 
 CÓMO PRACTICAR SIN REUNIONES
 
@@ -66,7 +66,7 @@ QUÉ HACE
 • Transcripción de dos hablantes: tus intervenciones y las suyas, separadas y agrupadas por idea
 • Traducción al español bajo cada turno del interlocutor, hecha en tu dispositivo
 • Transcripción en vivo que muestra lo que se está diciendo mientras se dice
-• Chips de vocabulario tras cada turno, y un kit de arranque con expresiones del tema del día antes de que nadie hable
+• Chips de frases que eliges (o añades tú mismo) y notas propias, visibles desde antes de empezar a hablar — no usan API ni conexión
 • Respuesta sugerida hecha para decirse en voz alta: una sola frase clara con el término clave resaltado, y dos versiones más ricas para estudiar después. Se apoya en tu perfil y en las notas que escribas sobre la conversación de hoy — ideal para entrevistas técnicas
 • Informe final: resumen de la reunión con lo que quedó pendiente, errores de gramática con la corrección y el porqué, calcos del español, conectores y frases para memorizar, muletillas y un nivel CEFR aproximado con ejercicios para la semana
 • Modo español: la misma asistencia —transcripción, respuesta sugerida e informe de coach de comunicación— para tus entrevistas y reuniones en tu propio idioma
