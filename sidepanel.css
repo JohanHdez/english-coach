@@ -105,16 +105,12 @@ button.danger { color: var(--danger); }
 .coach-title { font-size: 10.5px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 600; }
 button.ghost { background: transparent; border-color: var(--border); }
 
-.chips { display: flex; flex-wrap: wrap; gap: 5px; }
 .chip {
   background: var(--bg); border: 1px solid var(--border); border-radius: 999px;
   padding: 3px 9px; font-size: 12px; cursor: default;
 }
 .chip b { font-weight: 600; }
 .chip span { color: var(--muted); font-size: 11px; }
-
-.nudge { margin: 6px 0 0; font-size: 11.5px; color: var(--muted); font-style: italic; }
-.nudge:empty { display: none; }
 
 .phrases { display: flex; flex-wrap: wrap; gap: 6px; }
 .notes { margin-top: 8px; display: flex; flex-direction: column; gap: 4px; }

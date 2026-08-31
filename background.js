@@ -10,7 +10,7 @@ const OFFSCREEN_URL = 'offscreen.html';
 let sessionTabId = null;
 let running = false;
 let coachWindowId = null;
-const lastUi = { hints: null, chips: null, reply: null, status: null, live: null };
+const lastUi = { chips: null, reply: null, status: null, live: null };
 
 // When a tab is shared, Chrome can leave the user in a window with no side panel
 // and no extension bar: a system notification is the only thing they are
@@ -222,7 +222,6 @@ async function attachOverlay(tabId) {
     await chrome.tabs.sendMessage(tabId, { target: 'ui', type: 'RUNNING', running: true });
     if (lastUi.live) await chrome.tabs.sendMessage(tabId, lastUi.live);
     if (lastUi.chips) await chrome.tabs.sendMessage(tabId, lastUi.chips);
-    if (lastUi.hints) await chrome.tabs.sendMessage(tabId, lastUi.hints);
     if (lastUi.reply) await chrome.tabs.sendMessage(tabId, lastUi.reply);
   } catch { /* la pestaña no admite overlay */ }
 }
@@ -286,7 +285,6 @@ async function startCapture(settings, invocation = {}) {
   // Cleared before the start, not after: the offscreen document broadcasts
   // LIVE_STATE from inside its own start(), so by the time sendStart resolves the
   // cache already holds this session's value and wiping it would lose the notice.
-  lastUi.hints = null;
   lastUi.reply = null;
   lastUi.live = null;
 
@@ -349,7 +347,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   // Everything the offscreen document broadcasts for the UIs is mirrored into the tab.
   if (msg.target === 'ui') {
     if (msg.type === 'RUNNING') running = msg.running;
-    if (msg.type === 'HINTS') lastUi.hints = msg;
     if (msg.type === 'REPLY' && !msg.pending) lastUi.reply = msg;
     if (msg.type === 'STATUS') lastUi.status = msg;
     // Not a delta but a condition of the session: an overlay injected after a
@@ -410,7 +407,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           sendResponse({
             running,
             turns: transcript.slice(-12),
-            hints: lastUi.hints,
             chips: lastUi.chips,
             reply: lastUi.reply,
             status: lastUi.status,

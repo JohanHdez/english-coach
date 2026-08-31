@@ -34,8 +34,6 @@ export const DEFAULT_COACH = {
 // minute, and it stops a whole six-page CV pasted in from blowing through it.
 export const PROFILE_MAX_CHARS = 1500;
 
-// Deliberately NOT used in askHints: the chips run every six seconds, and repeating
-// the profile in every round exhausts the tokens-per-minute limit.
 function profileBlock(settings) {
   const texto = (settings.profile || '').trim().slice(0, PROFILE_MAX_CHARS);
   if (!texto) return '';
@@ -43,7 +41,7 @@ function profileBlock(settings) {
 }
 
 // Per-meeting notes ("entrevista técnica de Angular: signals, RxJS…"). Same
-// token-budget rule as the profile: reply and report only, never the chips.
+// token-budget rule as the profile.
 export const CONTEXT_MAX_CHARS = 1500;
 
 export function contextBlock(settings) {
@@ -219,12 +217,7 @@ const TURN_MAX_CHARS = 400;
 // the chips and the starter kept the old cap and hit the same 400 in production.
 const JSON_BUDGET = 1200;
 
-// The chips run every few seconds, so they carry the tightest transcript of the three:
-// the whole live round has to fit inside the free tier's minute next to everything else.
-const HINTS_MAX_CHARS = 1200;
-const HINTS_MAX_TURN_CHARS = 400;
-
-// Spanish-session override, appended to the live prompts: same structure and
+// Spanish-session override, appended to the reply prompt: same structure and
 // fields, but the phrases to say are Spanish and a gloss is pointless for a
 // native speaker — there the coach is professional support, not language help.
 const SPANISH_MODE = `
@@ -236,98 +229,7 @@ Return "es" as an empty string. "nudge" stays in Spanish.`;
 
 const langMode = (settings) => (settings.lang === 'es' ? SPANISH_MODE : '');
 
-// --- 1. Vocabulary chips after each of the other speaker's turns --------------
-
-const HINT_SYSTEM = `You help a Spanish-speaking professional keep up in a live English conversation.
-Given the recent turns, return:
-"words": 3 or 4 short items the learner is likely to need RIGHT NOW to answer — useful
-collocations, phrasal verbs or connectors, not full sentences, 1 to 4 words each.
-"openers": 2 or 3 short natural ways to BEGIN answering what was just said — connectors or
-framing phrases, 2 to 6 words each, spoken register.
-"nudge": one very short hint (max 8 words, in Spanish) about how to steer the answer.
-Each words/openers item has "en" and "es" (Spanish gloss, max 5 words).
-Reply ONLY with JSON: {"words":[{"en":"...","es":"..."}],"openers":[{"en":"...","es":"..."}],"nudge":"..."}`;
-
-const HINT_SCHEMA = {
-  type: 'object',
-  properties: {
-    words: {
-      type: 'array',
-      items: {
-        type: 'object',
-        properties: { en: { type: 'string' }, es: { type: 'string' } },
-        required: ['en', 'es'],
-        additionalProperties: false,
-      },
-    },
-    openers: {
-      type: 'array',
-      items: {
-        type: 'object',
-        properties: { en: { type: 'string' }, es: { type: 'string' } },
-        required: ['en', 'es'],
-        additionalProperties: false,
-      },
-    },
-    nudge: { type: 'string' },
-  },
-  required: ['words', 'openers', 'nudge'],
-  additionalProperties: false,
-};
-
-// Shared by the live hints and the pre-conversation starter: both broadcast the
-// same HINTS shape. Pure so Node can test it.
-export function parseHints(raw) {
-  const parsed = parseJsonLoose(raw);
-  if (!parsed || !Array.isArray(parsed.words)) throw new CoachError('Respuesta de sugerencias no válida.');
-  return {
-    words: parsed.words.filter((w) => w && w.en).slice(0, 4),
-    openers: cleanItems(parsed.openers).slice(0, 3),
-    nudge: typeof parsed.nudge === 'string' ? parsed.nudge : '',
-  };
-}
-
-export async function askHints({ turns, settings }) {
-  const raw = await ask({
-    provider: settings.liveProvider,
-    model: settings.liveModel,
-    keys: settings,
-    system: HINT_SYSTEM + langMode(settings),
-    user: `Learner level: ${settings.level}. Context: ${settings.situation}.\n\nConversation so far:\n${turnsToText(turns, 8, HINTS_MAX_CHARS, HINTS_MAX_TURN_CHARS)}`,
-    maxTokens: JSON_BUDGET,
-    schema: HINT_SCHEMA,
-  });
-  return parseHints(raw);
-}
-
-// --- 1b. Starter kit before the first turn ------------------------------------
-
-const STARTER_SYSTEM = `You help a Spanish-speaking professional get ready for an English
-conversation that is about to start. From the situation and their notes, return:
-"words": 4 short items they will likely need in THIS topic — connectors, collocations or
-phrasal verbs that make them sound natural, 1 to 4 words each.
-"openers": 2 or 3 short natural ways to begin an answer in this situation, 2 to 6 words each,
-spoken register.
-"nudge": one very short tip (max 8 words, in Spanish) to sound natural here.
-Each words/openers item has "en" and "es" (Spanish gloss, max 5 words).
-Reply ONLY with JSON: {"words":[{"en":"...","es":"..."}],"openers":[{"en":"...","es":"..."}],"nudge":"..."}`;
-
-// One call per session (and per mid-session context edit), on the cheap live
-// model: it primes the chips before the other person has said anything.
-export async function askStarter({ settings }) {
-  const raw = await ask({
-    provider: settings.liveProvider,
-    model: settings.liveModel,
-    keys: settings,
-    system: STARTER_SYSTEM + langMode(settings),
-    user: `Learner level: ${settings.level}. Situation: ${settings.situation}.${contextBlock(settings)}`,
-    maxTokens: JSON_BUDGET,
-    schema: HINT_SCHEMA,
-  });
-  return parseHints(raw);
-}
-
-// --- 2. Full reply on demand (keyboard shortcut) -----------------------------
+// --- 1. Full reply on demand (keyboard shortcut) -----------------------------
 
 const REPLY_SYSTEM = `You are helping a Spanish-speaking professional answer in a live English
 conversation. They will read your answer OUT LOUD while the other person waits, so it must be
@@ -411,7 +313,7 @@ export async function askReply({ turns, settings }) {
   return parseReply(raw);
 }
 
-// --- 3. Closing report -------------------------------------------------------
+// --- 2. Closing report -------------------------------------------------------
 
 const REPORT_SYSTEM = `Eres un profesor de inglés que analiza una conversación real de un hispanohablante.
 "LEARNER" es tu alumno; "OTHER" es la otra persona. El «Resumen de la reunión» usa TODA la

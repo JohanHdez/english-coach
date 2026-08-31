@@ -10,7 +10,7 @@ const els = {
   lang: $('lang'),
   themSource: $('themSource'), themDevice: $('themDevice'), deviceField: $('deviceField'),
   captureMic: $('captureMic'), settings: $('settings'), sessionContext: $('sessionContext'),
-  coach: $('coach'), chips: $('chips'), nudge: $('nudge'), hintOpeners: $('hintOpeners'), askReply: $('askReply'),
+  coach: $('coach'), askReply: $('askReply'),
   phrases: $('phrases'), notes: $('notes'),
   replyBox: $('replyBox'), replyStatus: $('replyStatus'),
   replyAnswer: $('replyAnswer'), replyIdeas: $('replyIdeas'),
@@ -94,27 +94,6 @@ function setRunning(v) {
 }
 
 // ------------------------------------------------------------------- coach
-
-function showHints({ words = [], nudge = '', openers = [] }) {
-  // Unconditional rebuild in a slot of their own: an empty round clears stale
-  // openers, and the reply box's ⌘⇧E openers/ideas pairing is never touched.
-  fillGroup(els.hintOpeners, openers);
-  els.chips.innerHTML = '';
-  for (const w of words) {
-    const chip = document.createElement('span');
-    chip.className = 'chip';
-    const en = document.createElement('b');
-    en.textContent = w.en;
-    chip.append(en);
-    if (w.es) {
-      const es = document.createElement('span');
-      es.textContent = ' · ' + w.es;
-      chip.append(es);
-    }
-    els.chips.append(chip);
-  }
-  els.nudge.textContent = nudge || '';
-}
 
 // Phrases need no interaction: they are there to be glanced at mid-sentence.
 // Notes are collapsed but remember their state, so the learner opens "Mi daily"
@@ -394,8 +373,6 @@ els.toggle.addEventListener('click', async () => {
   if (res && res.ok) {
     setRunning(true);
     setStatus('Grabando…', 'ok');
-    els.chips.innerHTML = '';
-    els.nudge.textContent = '';
     els.replyBox.hidden = true;
   } else {
     setStatus(res?.error || 'No se pudo iniciar.', 'error');
@@ -427,8 +404,6 @@ els.clear.addEventListener('click', async () => {
   entries = [];
   await chrome.storage.local.set({ transcript: [] });
   render();
-  els.chips.innerHTML = '';
-  els.nudge.textContent = '';
   els.replyBox.hidden = true;
   setStatus('Transcripción borrada.');
 });
@@ -448,7 +423,6 @@ chrome.runtime.onMessage.addListener((msg) => {
     if (msg.state !== 'available') showPartial('');
     showLiveNote(msg);
   }
-  else if (msg.type === 'HINTS') showHints(msg);
   else if (msg.type === 'COACH_CHIPS') showChips(msg);
   else if (msg.type === 'REPLY') showReply(msg);
   else if (msg.type === 'STATUS') setStatus(msg.text, msg.kind);

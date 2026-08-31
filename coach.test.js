@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseReply, parseHints, turnsToText, contextBlock, CONTEXT_MAX_CHARS, askHints, askStarter, askReply, askReport } from './coach.js';
+import { parseReply, turnsToText, contextBlock, CONTEXT_MAX_CHARS, askReply, askReport } from './coach.js';
 
 test('parseReply returns one speakable answer and two study ideas, cleaned', () => {
   const raw = JSON.stringify({
@@ -57,23 +57,6 @@ test('turnsToText always keeps at least the last turn, even over budget', () => 
   assert.ok(turnsToText(turns, 10, 5).includes('tiny budget'));
 });
 
-test('parseHints returns capped words, cleaned openers and the nudge', () => {
-  const raw = JSON.stringify({
-    words: [{ en: 'w1', es: '' }, { en: 'w2', es: '' }, { en: 'w3', es: '' }, { en: 'w4', es: '' }, { en: 'w5', es: '' }],
-    openers: [{ en: '"Well, the way I see it,"', es: 'bueno' }, { en: '', es: 'vacío' }],
-    nudge: 'directo y corto',
-  });
-  const out = parseHints(raw);
-  assert.equal(out.words.length, 4);
-  assert.equal(out.openers.length, 1);
-  assert.equal(out.openers[0].en, 'Well, the way I see it,');
-  assert.equal(out.nudge, 'directo y corto');
-});
-
-test('parseHints rejects a reply without words', () => {
-  assert.throws(() => parseHints(JSON.stringify({ openers: [], nudge: '' })));
-});
-
 test('contextBlock is empty when there are no notes', () => {
   assert.equal(contextBlock({}), '');
   assert.equal(contextBlock({ sessionContext: '   ' }), '');
@@ -87,11 +70,8 @@ test('contextBlock carries the notes, capped at the limit', () => {
   assert.ok(long.includes('x'.repeat(CONTEXT_MAX_CHARS)));
 });
 
-// --- Regression: Groq 400 json_validate_failed on the live chips ---------------
-// gpt-oss spends reasoning tokens from max_completion_tokens before it writes the
-// JSON. Commit 0f63f92 proved a tight cap truncates the object and Groq rejects
-// the call with json_validate_failed; the chips kept the cap that reply had shed.
-
+// Stub for the Groq endpoint, shared by the tests below: captures the request
+// body instead of hitting the network.
 function stubGroq(capture, content) {
   const original = globalThis.fetch;
   globalThis.fetch = async (url, init) => {
@@ -101,50 +81,6 @@ function stubGroq(capture, content) {
   };
   return () => { globalThis.fetch = original; };
 }
-
-const LIVE_SETTINGS = {
-  liveProvider: 'groq',
-  liveModel: 'openai/gpt-oss-20b',
-  groqKey: 'gsk_test_key_for_unit_tests',
-  level: 'B1-B2',
-  situation: 'conversación de trabajo en inglés',
-  lang: 'en',
-};
-
-const HINTS_JSON = JSON.stringify({ words: [{ en: 'so far', es: 'hasta ahora' }], openers: [], nudge: '' });
-
-test('askHints leaves gpt-oss room to reason before the JSON', async () => {
-  const seen = {};
-  const restore = stubGroq(seen, HINTS_JSON);
-  try {
-    await askHints({ turns: [{ speaker: 'them', text: 'How is the app going?' }], settings: LIVE_SETTINGS });
-  } finally { restore(); }
-  assert.ok(
-    seen.body.max_completion_tokens >= 1200,
-    `chips asked for ${seen.body.max_completion_tokens} completion tokens; reasoning leaves too few for the JSON`,
-  );
-});
-
-test('askStarter leaves gpt-oss room to reason before the JSON', async () => {
-  const seen = {};
-  const restore = stubGroq(seen, HINTS_JSON);
-  try {
-    await askStarter({ settings: LIVE_SETTINGS });
-  } finally { restore(); }
-  assert.ok(seen.body.max_completion_tokens >= 1200, `starter asked for ${seen.body.max_completion_tokens}`);
-});
-
-test('askHints bounds the conversation it sends, even on a Whisper repetition loop', async () => {
-  const loop = { speaker: 'me', text: "I'm not sure if I'm going to " + 'be able to '.repeat(400) };
-  const turns = Array.from({ length: 8 }, () => loop);
-  const seen = {};
-  const restore = stubGroq(seen, HINTS_JSON);
-  try {
-    await askHints({ turns, settings: LIVE_SETTINGS });
-  } finally { restore(); }
-  const user = seen.body.messages.find((m) => m.role === 'user').content;
-  assert.ok(user.length < 4000, `chips prompt grew to ${user.length} chars; a repetition loop is unbounded`);
-});
 
 const REPLY_SETTINGS = {
   reportProvider: 'groq',

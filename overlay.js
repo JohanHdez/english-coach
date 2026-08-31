@@ -111,8 +111,6 @@
     }
     .chip b { font-weight: 600; }
     .chip i { color: #9aa0a6; font-style: normal; font-size: 11px; }
-    .nudge { color: #9aa0a6; font-style: italic; font-size: 11.5px; margin: 7px 0 0; }
-    .nudge:empty { display: none; }
 
     .phrases { display: flex; flex-wrap: wrap; gap: 5px; }
     .notes { display: flex; flex-direction: column; gap: 3px; margin-top: 6px; }
@@ -154,12 +152,6 @@
     .reply-item b { font-weight: 600; }
     .reply-item i { display: block; color: #9aa0a6; font-size: 11px; margin-top: 2px; }
 
-    /* The openers pinned above the conversation render as one wrapping chip
-       row: full-width two-line rows would eat the height the turns need. */
-    .hint-openers .reply-list { flex-direction: row; flex-wrap: wrap; }
-    .hint-openers .reply-item { width: auto; border-radius: 999px; padding: 3px 10px; font-size: 12px; }
-    .hint-openers .reply-item i { display: inline; margin: 0 0 0 5px; }
-
     /* One answer, read out loud at a glance: big and calm, only the key term
        bold. The study ideas stay small — they are for after the conversation. */
     .reply-group.answer .reply-item { font-size: 15px; line-height: 1.5; }
@@ -186,7 +178,7 @@
     .foot button.ghost { background: #22262c; color: #e8eaed; border: 1px solid #2c3038; font-weight: 400; }
     .card.idle .reply-btn, .card.idle .stop-btn { display: none; }
     .card:not(.idle) .start-btn { display: none; }
-    .card.idle .turns, .card.idle .chips, .card.idle .nudge, .card.idle .reply, .card.idle .hint-openers { display: none; }
+    .card.idle .turns, .card.idle .chips, .card.idle .reply { display: none; }
   `;
 
   const host = document.createElement('div');
@@ -208,10 +200,6 @@
         <p class="status">Grabando…</p>
         <p class="live-note" hidden></p>
         <div class="chips"></div>
-        <p class="nudge"></p>
-        <div class="hint-openers reply-group" hidden>
-          <span class="reply-label">Para arrancar</span><div class="reply-list"></div>
-        </div>
         <div class="phrases"></div>
         <div class="notes"></div>
         <div class="turns"></div>
@@ -444,31 +432,6 @@
     $('.reply').classList.toggle('show', !!(aviso || answer.length || ideas.length));
   }
 
-  function showHints({ words = [], nudge = '', openers = [] }) {
-    // The openers ride on the same HINTS round: connectors to start answering
-    // appear by themselves after each turn, in their own slot. Rebuilt
-    // unconditionally so an error round (which carries no openers) clears the
-    // previous turn's instead of leaving them on screen looking current — and
-    // never in the reply box, whose openers/ideas pairing belongs to ⌘⇧E.
-    fillGroup($('.hint-openers'), openers);
-    const chips = $('.chips');
-    chips.innerHTML = '';
-    for (const w of words) {
-      const chip = document.createElement('span');
-      chip.className = 'chip';
-      const en = document.createElement('b');
-      en.textContent = w.en;
-      chip.append(en);
-      if (w.es) {
-        const es = document.createElement('i');
-        es.textContent = ' · ' + w.es;
-        chip.append(es);
-      }
-      chips.append(chip);
-    }
-    $('.nudge').textContent = nudge || '';
-  }
-
   function showChips({ phrases = [], notes = [] }) {
     const lane = $('.phrases');
     lane.textContent = '';
@@ -600,7 +563,6 @@
         break;
       case 'STATUS': if (msg.show) show(true); setStatus(msg.text, msg.kind); break;
       case 'SEGMENT': show(true); addTurn(msg.entry); break;
-      case 'HINTS': show(true); showHints(msg); break;
       case 'COACH_CHIPS': showChips(msg); break;
       case 'REPLY': show(true); showReply(msg); break;
       case 'QUEUE': if (msg.pending > 0) setStatus(`Transcribiendo… (${msg.pending})`); break;
@@ -646,7 +608,6 @@
       setStatus('Grabando…', 'ok');
       showLiveNote(st.live);
       for (const t of st.turns || []) addTurn(t);
-      if (st.hints) showHints(st.hints);
       if (st.chips) showChips(st.chips);
     })
     .catch(() => {});
