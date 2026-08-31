@@ -23,7 +23,7 @@
       .hint { color: var(--muted); font-size: 12px; margin: 4px 0 0; }
       .row { display: flex; gap: 8px; align-items: center; }
       .row input[type="text"] { flex: 1; }
-      #catalogue h3 { font-size: 13px; margin: 14px 0 6px; }
+      h3 { font-size: 13px; margin: 14px 0 6px; }
       #catalogue h3:first-child { margin-top: 0; }
       .phrase-row {
         display: flex; align-items: baseline; gap: 6px; padding: 4px 0;
@@ -140,7 +140,7 @@
         <span>Generar el informe automáticamente al detener la grabación</span>
       </label>
       <div class="field">
-        <span>Modelo para el informe (prioriza calidad)</span>
+        <span>Modelo para la respuesta sugerida y el informe (prioriza calidad)</span>
         <select id="reportModel"></select>
       </div>
       <p id="keyWarn" class="hint err" hidden></p>
@@ -178,12 +178,12 @@
       <p class="hint">El atajo <code>⌘⇧E</code> (Mac) o <code>Ctrl+Shift+E</code> pide una respuesta completa sin soltar el teclado. Se cambia en <code>chrome://extensions/shortcuts</code>.</p>
     </div>
 
-    <section>
+    <div class="card">
       <h2 style="margin-top:0">4. Chips y notas</h2>
       <p class="hint">Las frases que quieres ver durante la conversación. No usan API ni conexión.</p>
       <div id="catalogue"></div>
 
-      <label>Añadir una frase tuya</label>
+      <h3>Añadir una frase tuya</h3>
       <div class="row">
         <input type="text" id="customEn" placeholder="Let me double-check that," />
         <input type="text" id="customEs" placeholder="déjame confirmarlo" />
@@ -191,11 +191,11 @@
       </div>
       <div id="customList"></div>
 
-      <label>Notas</label>
+      <h3>Notas</h3>
       <p class="hint">Apuntes tuyos: un título corto y el texto que quieras tener a mano.</p>
       <div id="noteList"></div>
       <button id="addNote" class="small" type="button">Añadir nota</button>
-    </section>
+    </div>
 
     <div class="card">
       <h2 style="margin-top:0">5. Cómo capturar cada fuente</h2>

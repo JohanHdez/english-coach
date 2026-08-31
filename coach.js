@@ -1,4 +1,5 @@
-// Coaching layer: live suggestions, full reply, and the closing report.
+// Coaching layer: the suggested reply on demand and the closing report. The live
+// chips and notes come from phrasebook.js and call no model at all.
 // Two interchangeable providers: Groq (OpenAI-compatible) and Claude (Anthropic).
 
 export const PROVIDERS = {
@@ -212,7 +213,8 @@ const TURN_MAX_CHARS = 400;
 // spend reasoning tokens from max_completion_tokens BEFORE they write the JSON, so a
 // tight cap truncates the object mid-key and Groq rejects the whole call with 400
 // json_validate_failed. 1200 is the figure that stopped it for the reply in v1.17.1;
-// the now-deleted per-turn call kept the old cap and hit the same 400 in production.
+// the two live-suggestion calls that kept the old cap both hit the same 400 in
+// production, and they went away with the live model layer rather than being retuned.
 const JSON_BUDGET = 1200;
 
 // Spanish-session override, appended to the reply prompt: same structure and

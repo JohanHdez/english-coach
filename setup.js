@@ -26,7 +26,8 @@ const DEFAULTS = {
   ...DEFAULT_COACH,
 };
 
-// Each option carries "provider:model" so Groq and Claude can be mixed.
+// Each option carries "provider:model": one select spans both providers, so the value
+// has to name which one. It is the model the suggested reply and the report both use.
 function fillModelSelect(sel, selected) {
   sel.innerHTML = '';
   for (const [id, spec] of Object.entries(PROVIDERS)) {
@@ -163,7 +164,7 @@ const LIVE_MSG = {
 };
 
 // Warn before recording: picking a model from a provider with no key is the easiest
-// way to end up with no report right when the conversation finishes.
+// way to end up with no suggested reply and no report right when they are needed.
 function checkKeys() {
   const el = $('keyWarn');
   const keys = { groqKey: $('groqKey').value.trim(), anthropicKey: $('anthropicKey').value.trim() };
@@ -171,8 +172,8 @@ function checkKeys() {
   const elegido = resolveProvider(pedido, keys);
   const label = PROVIDERS[pedido]?.label || pedido;
   let aviso = '';
-  if (!elegido) aviso = 'No hay ninguna API key: el informe no funcionará.';
-  else if (elegido.fallback) aviso = `Sin key de ${label}: el informe usará ${elegido.label}.`;
+  if (!elegido) aviso = 'No hay ninguna API key: la respuesta sugerida y el informe no funcionarán.';
+  else if (elegido.fallback) aviso = `Sin key de ${label}: la respuesta sugerida y el informe usarán ${elegido.label}.`;
   el.textContent = aviso;
   el.hidden = !aviso;
 }

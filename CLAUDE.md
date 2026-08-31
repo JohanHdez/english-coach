@@ -161,4 +161,5 @@ Skills: `/preflight`, `/add-provider`, `/release`.
   is still requested. Preflight reports both.
 - `host_permissions` covers every site; only `huggingface.co`, `api.groq.com` and
   `api.anthropic.com` are actually fetched.
-- No unit tests exist yet, despite four modules being written to be testable.
+- `capture.js` and `report.js` are written to be testable but have no tests; `coach.js`,
+  `segmenter.js`, `worker.js` and `phrasebook.js` carry the 59 that exist.
