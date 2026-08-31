@@ -207,6 +207,11 @@ export function turnsToText(turns, limit = 10, maxChars = Infinity, maxTurnChars
 // Leaves room for the system prompt and the 2800 output tokens within the free minute.
 const REPORT_MAX_CHARS = 12000;
 
+// A Whisper repetition loop is one segment of thousands of characters; MERGE_MAX_CHARS
+// bounds folding, not a single transcription. Without a per-turn cap, turnsToText's
+// "keep at least the last turn" rule passes the whole loop through.
+const TURN_MAX_CHARS = 400;
+
 // Every call that constrains the answer to a schema shares this budget. gpt-oss models
 // spend reasoning tokens from max_completion_tokens BEFORE they write the JSON, so a
 // tight cap truncates the object mid-key and Groq rejects the whole call with 400
@@ -397,7 +402,7 @@ export async function askReply({ turns, settings }) {
       // Capped by characters, not turns: soft cuts split one long question into
       // many small segments, so a turn count could drop the question itself. The
       // cap keeps it whole while bounding cost and latency.
-      + `\n\nConversation so far:\n${turnsToText(turns, 10, 1200)}`
+      + `\n\nConversation so far:\n${turnsToText(turns, 10, 1200, TURN_MAX_CHARS)}`
       + `\n\nAnswer the other person's last turn for the learner: one speakable answer, then two study ideas.`,
     maxTokens: JSON_BUDGET,
     schema: REPLY_SCHEMA,
@@ -487,7 +492,7 @@ en la próxima conversación para que cada una mejore la anterior.`;
 export async function askReport({ turns, settings }) {
   const mine = turns.filter((t) => t.speaker === 'me').length;
   if (mine === 0) throw new CoachError('No hay intervenciones tuyas para analizar.');
-  const texto = turnsToText(turns, 400, REPORT_MAX_CHARS);
+  const texto = turnsToText(turns, 400, REPORT_MAX_CHARS, TURN_MAX_CHARS);
   const recortada = texto.split('\n').length < turns.length;
   return ask({
     provider: settings.reportProvider,

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseReply, parseHints, turnsToText, contextBlock, CONTEXT_MAX_CHARS, askHints, askStarter } from './coach.js';
+import { parseReply, parseHints, turnsToText, contextBlock, CONTEXT_MAX_CHARS, askHints, askStarter, askReply } from './coach.js';
 
 test('parseReply returns one speakable answer and two study ideas, cleaned', () => {
   const raw = JSON.stringify({
@@ -92,18 +92,12 @@ test('contextBlock carries the notes, capped at the limit', () => {
 // JSON. Commit 0f63f92 proved a tight cap truncates the object and Groq rejects
 // the call with json_validate_failed; the chips kept the cap that reply had shed.
 
-function stubGroq(capture) {
+function stubGroq(capture, content) {
   const original = globalThis.fetch;
   globalThis.fetch = async (url, init) => {
     capture.url = url;
     capture.body = JSON.parse(init.body);
-    return {
-      ok: true,
-      status: 200,
-      json: async () => ({
-        choices: [{ message: { content: JSON.stringify({ words: [{ en: 'so far', es: 'hasta ahora' }], openers: [], nudge: '' }) } }],
-      }),
-    };
+    return { ok: true, status: 200, json: async () => ({ choices: [{ message: { content } }] }) };
   };
   return () => { globalThis.fetch = original; };
 }
@@ -117,9 +111,11 @@ const LIVE_SETTINGS = {
   lang: 'en',
 };
 
+const HINTS_JSON = JSON.stringify({ words: [{ en: 'so far', es: 'hasta ahora' }], openers: [], nudge: '' });
+
 test('askHints leaves gpt-oss room to reason before the JSON', async () => {
   const seen = {};
-  const restore = stubGroq(seen);
+  const restore = stubGroq(seen, HINTS_JSON);
   try {
     await askHints({ turns: [{ speaker: 'them', text: 'How is the app going?' }], settings: LIVE_SETTINGS });
   } finally { restore(); }
@@ -131,7 +127,7 @@ test('askHints leaves gpt-oss room to reason before the JSON', async () => {
 
 test('askStarter leaves gpt-oss room to reason before the JSON', async () => {
   const seen = {};
-  const restore = stubGroq(seen);
+  const restore = stubGroq(seen, HINTS_JSON);
   try {
     await askStarter({ settings: LIVE_SETTINGS });
   } finally { restore(); }
@@ -142,10 +138,38 @@ test('askHints bounds the conversation it sends, even on a Whisper repetition lo
   const loop = { speaker: 'me', text: "I'm not sure if I'm going to " + 'be able to '.repeat(400) };
   const turns = Array.from({ length: 8 }, () => loop);
   const seen = {};
-  const restore = stubGroq(seen);
+  const restore = stubGroq(seen, HINTS_JSON);
   try {
     await askHints({ turns, settings: LIVE_SETTINGS });
   } finally { restore(); }
   const user = seen.body.messages.find((m) => m.role === 'user').content;
   assert.ok(user.length < 4000, `chips prompt grew to ${user.length} chars; a repetition loop is unbounded`);
+});
+
+const REPLY_SETTINGS = {
+  reportProvider: 'groq',
+  reportModel: 'openai/gpt-oss-120b',
+  groqKey: 'gsk_test_key_for_unit_tests',
+  level: 'B1-B2',
+  situation: 'conversación de trabajo en inglés',
+  lang: 'en',
+};
+const REPLY_JSON = JSON.stringify({
+  answer: [{ en: 'It depends on the load.', es: 'depende de la carga' }],
+  ideas: [{ en: 'idea', es: 'idea' }],
+});
+
+test('askReply clips a repetition-loop turn out of its prompt', async () => {
+  const loop = { speaker: 'me', text: 'be able to '.repeat(400) };
+  const seen = {};
+  const restore = stubGroq(seen, REPLY_JSON);
+  try {
+    await askReply({
+      turns: [{ speaker: 'them', text: 'How is the migration going?' }, loop],
+      settings: REPLY_SETTINGS,
+    });
+  } finally { restore(); }
+  const user = seen.body.messages.find((m) => m.role === 'user').content;
+  assert.ok(!user.includes('be able to '.repeat(50)), 'the repetition loop reached the prompt whole');
+  assert.ok(user.length < 2500, `reply prompt grew to ${user.length} chars`);
 });
