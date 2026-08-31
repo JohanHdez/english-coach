@@ -1,7 +1,7 @@
 import { DEFAULT_COACH, CONTEXT_MAX_CHARS } from './coach.js';
 import { toSpanish } from './translate.js';
 import { installLive } from './live.js';
-import { resolvePhrases, resolveNotes } from './phrasebook.js';
+import { resolveChips } from './phrasebook.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -342,7 +342,7 @@ async function init() {
     await chrome.storage.local.get(['settings', 'transcript', 'lastError']);
   settings = { ...DEFAULT_COACH, ...stored };
   // First paint without waiting for a broadcast; COACH_CHIPS keeps it live afterwards.
-  showChips({ phrases: resolvePhrases(settings), notes: resolveNotes(settings) });
+  showChips(resolveChips(settings));
   els.lang.value = settings.lang || 'en';
   els.themSource.value = settings.themSource || 'tab';
   els.captureMic.checked = settings.captureMic !== false;

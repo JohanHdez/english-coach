@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  CATALOGUE, DEFAULT_PHRASE_IDS, resolvePhrases, resolveNotes,
+  CATALOGUE, DEFAULT_PHRASE_IDS, resolvePhrases, resolveNotes, resolveChips,
   NOTE_TITLE_MAX, NOTE_BODY_MAX, MAX_NOTES, MAX_CUSTOM,
 } from './phrasebook.js';
 
@@ -90,4 +90,31 @@ test('resolveNotes defaults a note to closed and never returns undefined fields'
 test('resolveNotes on empty settings returns an empty list', () => {
   assert.deepEqual(resolveNotes({}), []);
   assert.deepEqual(resolveNotes({ notes: null }), []);
+});
+
+test('resolveChips returns empty phrases and notes when liveCoach is false', () => {
+  const settings = {
+    liveCoach: false,
+    phraseIds: ['time.second'],
+    notes: [{ id: 'n.1', title: 'Mi daily', body: 'x', open: true }],
+  };
+  assert.deepEqual(resolveChips(settings), { phrases: [], notes: [] });
+});
+
+test('resolveChips defaults to on and returns the seeded phrases when liveCoach is absent', () => {
+  const out = resolveChips({});
+  assert.equal(out.phrases.length, DEFAULT_PHRASE_IDS.length);
+  assert.deepEqual(out.notes, []);
+});
+
+test('resolveChips returns content when liveCoach is true', () => {
+  const settings = {
+    liveCoach: true,
+    phraseIds: ['time.second'],
+    notes: [{ id: 'n.1', title: 'Mi daily', body: 'x', open: true }],
+  };
+  const out = resolveChips(settings);
+  assert.deepEqual(out.phrases.map((p) => p.id), ['time.second']);
+  assert.equal(out.notes.length, 1);
+  assert.equal(out.notes[0].id, 'n.1');
 });

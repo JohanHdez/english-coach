@@ -104,3 +104,10 @@ export function resolveNotes(settings = {}) {
       open: n.open === true,
     }));
 }
+
+// One definition of "coaching is off", so the service worker's broadcast and a
+// view's own first paint cannot disagree about what the learner should see.
+export function resolveChips(settings = {}) {
+  if (settings.liveCoach === false) return { phrases: [], notes: [] };
+  return { phrases: resolvePhrases(settings), notes: resolveNotes(settings) };
+}

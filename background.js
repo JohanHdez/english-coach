@@ -1,7 +1,7 @@
 // Service worker: coordinates the side panel, the in-page overlay and the
 // offscreen document (which does the recording, transcribing and coaching).
 
-import { resolvePhrases, resolveNotes } from './phrasebook.js';
+import { resolveChips } from './phrasebook.js';
 
 const OFFSCREEN_URL = 'offscreen.html';
 
@@ -203,12 +203,7 @@ function relayToTab(msg) {
 // storage. Broadcast whether or not a session is running.
 async function broadcastChips() {
   const { settings = {} } = await chrome.storage.local.get('settings');
-  const msg = {
-    target: 'ui',
-    type: 'COACH_CHIPS',
-    phrases: settings.liveCoach === false ? [] : resolvePhrases(settings),
-    notes: settings.liveCoach === false ? [] : resolveNotes(settings),
-  };
+  const msg = { target: 'ui', type: 'COACH_CHIPS', ...resolveChips(settings) };
   lastUi.chips = msg;
   chrome.runtime.sendMessage(msg).catch(() => {});
   relayToTab(msg);
