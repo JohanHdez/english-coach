@@ -114,6 +114,16 @@
     .nudge { color: #9aa0a6; font-style: italic; font-size: 11.5px; margin: 7px 0 0; }
     .nudge:empty { display: none; }
 
+    .phrases { display: flex; flex-wrap: wrap; gap: 5px; }
+    .notes { display: flex; flex-direction: column; gap: 3px; margin-top: 6px; }
+    .note-head {
+      width: 100%; text-align: left; background: none; border: 0; cursor: pointer;
+      color: #e8eaed; font: inherit; font-size: 12px; padding: 2px 0;
+    }
+    .note-body { margin: 2px 0 5px 14px; white-space: pre-wrap; font-size: 11.5px; color: #bdc1c6; }
+    .notes:empty, .phrases:empty { display: none; }
+    .card.idle .phrases, .card.idle .notes { display: none; }
+
     /* Hidden by a class, not :empty — the box always holds its status and group
        skeleton, so :empty never matches and an idle blue strip would show. */
     .reply {
@@ -202,6 +212,8 @@
         <div class="hint-openers reply-group" hidden>
           <span class="reply-label">Para arrancar</span><div class="reply-list"></div>
         </div>
+        <div class="phrases"></div>
+        <div class="notes"></div>
         <div class="turns"></div>
         <div class="partial" hidden><span class="partial-en"></span><span class="es"></span></div>
         <div class="reply">
@@ -457,6 +469,45 @@
     $('.nudge').textContent = nudge || '';
   }
 
+  function showChips({ phrases = [], notes = [] }) {
+    const lane = $('.phrases');
+    lane.textContent = '';
+    for (const p of phrases) {
+      const chip = document.createElement('span');
+      chip.className = 'chip';
+      const en = document.createElement('b');
+      en.textContent = p.en;
+      chip.append(en);
+      if (p.es) {
+        const es = document.createElement('i');
+        es.textContent = ' · ' + p.es;
+        chip.append(es);
+      }
+      lane.append(chip);
+    }
+
+    const list = $('.notes');
+    list.textContent = '';
+    for (const n of notes) {
+      const item = document.createElement('div');
+      item.className = 'note';
+      const head = document.createElement('button');
+      head.className = 'note-head';
+      head.type = 'button';
+      head.textContent = (n.open ? '▾ ' : '▸ ') + (n.title || 'Nota');
+      const body = document.createElement('p');
+      body.className = 'note-body';
+      body.textContent = n.body;
+      body.hidden = !n.open;
+      // The content script has no chrome.storage: the toggle goes through the router.
+      head.addEventListener('click', () => {
+        chrome.runtime.sendMessage({ type: 'TOGGLE_NOTE', id: n.id }).catch(() => {});
+      });
+      item.append(head, body);
+      list.append(item);
+    }
+  }
+
   // --- dragging the card ---------------------------------------------------
   let drag = null;
   $('.head').addEventListener('mousedown', (e) => {
@@ -550,6 +601,7 @@
       case 'STATUS': if (msg.show) show(true); setStatus(msg.text, msg.kind); break;
       case 'SEGMENT': show(true); addTurn(msg.entry); break;
       case 'HINTS': show(true); showHints(msg); break;
+      case 'COACH_CHIPS': showChips(msg); break;
       case 'REPLY': show(true); showReply(msg); break;
       case 'QUEUE': if (msg.pending > 0) setStatus(`Transcribiendo… (${msg.pending})`); break;
       case 'PARTIAL': if (msg.text) show(true); showPartial(msg.text); break;
@@ -595,6 +647,7 @@
       showLiveNote(st.live);
       for (const t of st.turns || []) addTurn(t);
       if (st.hints) showHints(st.hints);
+      if (st.chips) showChips(st.chips);
     })
     .catch(() => {});
 })();

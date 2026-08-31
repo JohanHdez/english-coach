@@ -37,6 +37,7 @@ overlay / sidepanel / setup ──► background ──► offscreen ──► w
 | `SHUTDOWN` | — | closes the offscreen document |
 | `STORE_GET` | `keys` | offscreen's only route to `chrome.storage` |
 | `STORE_SET` | `items` | as above |
+| `TOGGLE_NOTE` | `id` | flips a note's `open` in settings; the write re-broadcasts `COACH_CHIPS` |
 
 **background → offscreen** (`target: 'offscreen'`)
 

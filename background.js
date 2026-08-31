@@ -428,6 +428,15 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           sendResponse({ ok: true });
           break;
         }
+        // The overlay has no chrome.storage: it flips a note's open state here.
+        // Only the write happens — storage.onChanged re-broadcasts COACH_CHIPS.
+        case 'TOGGLE_NOTE': {
+          const { settings = {} } = await chrome.storage.local.get('settings');
+          const notes = (settings.notes || []).map((n) => (n.id === msg.id ? { ...n, open: !n.open } : n));
+          await chrome.storage.local.set({ settings: { ...settings, notes } });
+          sendResponse({ ok: true });
+          break;
+        }
         case 'OPEN_REPORT': {
           await chrome.tabs.create({ url: chrome.runtime.getURL('report.html') });
           sendResponse({ ok: true });
