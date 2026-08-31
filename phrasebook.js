@@ -120,3 +120,21 @@ export function toggleNoteOpen(settings = {}, id) {
   const notes = Array.isArray(settings.notes) ? settings.notes : [];
   return { ...settings, notes: notes.map((n) => (n && n.id === id ? { ...n, open: !n.open } : n)) };
 }
+
+// Matching the language subtag, not a prefix: "eng-X" is not English here, and
+// some platforms report the tag with an underscore.
+const EN = /^en(?:[-_]|$)/i;
+const US = /^en[-_]us$/i;
+
+// The Web Speech API hands over whatever the OS installed, and choosing badly is
+// worse than staying silent — an English phrase read by a Spanish voice teaches the
+// wrong pronunciation. Chrome also offers network-backed voices, which would send
+// the phrase to a server and quietly break the property that the chips need no
+// connection, so a local voice wins even over a better-sounding remote one.
+export function pickEnglishVoice(voices = []) {
+  const english = (Array.isArray(voices) ? voices : [])
+    .filter((v) => v && typeof v.lang === 'string' && EN.test(v.lang));
+  if (!english.length) return null;
+  const rank = (v) => (v.localService === false ? 2 : 0) + (US.test(v.lang) ? 0 : 1);
+  return english.reduce((best, v) => (rank(v) < rank(best) ? v : best));
+}

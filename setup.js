@@ -1,8 +1,8 @@
 import { PROVIDERS, DEFAULT_COACH } from './coach.js';
 import { liveAvailability, installLive } from './live.js';
 import { resolveProvider, PROFILE_MAX_CHARS, CONTEXT_MAX_CHARS } from './coach.js';
-import { CATALOGUE, DEFAULT_PHRASE_IDS, MAX_NOTES, MAX_CUSTOM, NOTE_TITLE_MAX, NOTE_BODY_MAX }
-  from './phrasebook.js';
+import { CATALOGUE, DEFAULT_PHRASE_IDS, MAX_NOTES, MAX_CUSTOM, NOTE_TITLE_MAX, NOTE_BODY_MAX,
+  pickEnglishVoice } from './phrasebook.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -63,6 +63,62 @@ async function listMics(selected) {
   return inputs;
 }
 
+// --- pronunciation ------------------------------------------------------------
+// speechSynthesis needs no permission and no host: the voices belong to the
+// operating system, so the phrasebook keeps working with no key and no connection.
+// getVoices() is empty until the engine has finished loading them, which is the
+// only thing voiceschanged announces.
+let enVoice = null;
+
+const checkedIds = () => [...document.querySelectorAll('.phrase-cb:checked')].map((cb) => cb.value);
+
+function loadVoices() {
+  const synth = globalThis.speechSynthesis;
+  if (!synth) return;
+  const found = pickEnglishVoice(synth.getVoices());
+  if (found === enVoice) return;
+  const appeared = !enVoice && !!found;
+  enVoice = found;
+  // Buttons are only built when a voice exists, so a list drawn before the engine
+  // answered has to be rebuilt once it does.
+  if (appeared && $('catalogue').childElementCount) {
+    renderCatalogue(checkedIds());
+    renderCustom();
+  }
+}
+
+function speak(text) {
+  const synth = globalThis.speechSynthesis;
+  if (!synth || !enVoice) return;
+  synth.cancel();
+  const u = new SpeechSynthesisUtterance(text);
+  u.voice = enVoice;
+  // Always English, never settings.lang: the catalogue is English whatever the
+  // session language is, and reading it with a Spanish voice would teach the wrong
+  // pronunciation — worse than offering nothing.
+  u.lang = enVoice.lang || 'en-US';
+  u.rate = 0.9;
+  synth.speak(u);
+}
+
+// Null when no English voice is installed: the row then renders without a button.
+function sayButton(text) {
+  if (!enVoice) return null;
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = 'say';
+  b.textContent = '\u{1F50A}';
+  b.title = 'Escuchar la pronunciación';
+  b.addEventListener('click', (e) => {
+    // A catalogue row is a <label> wrapping the checkbox, so without this the
+    // speaker would also tick or untick the phrase.
+    e.preventDefault();
+    e.stopPropagation();
+    speak(text);
+  });
+  return b;
+}
+
 function renderCatalogue(chosen) {
   const box = $('catalogue');
   box.textContent = '';
@@ -85,6 +141,8 @@ function renderCatalogue(chosen) {
       es.className = 'hint';
       es.textContent = ' · ' + item.es;
       label.append(cb, en, es);
+      const say = sayButton(item.en);
+      if (say) label.append(say);
       box.append(label);
     }
   }
@@ -106,7 +164,10 @@ function renderCustom() {
     del.className = 'small';
     del.textContent = 'Quitar';
     del.addEventListener('click', () => { customPhrases.splice(i, 1); renderCustom(); });
-    row.append(en, es, del);
+    row.append(en, es);
+    const say = sayButton(p.en);
+    if (say) row.append(say);
+    row.append(del);
     box.append(row);
   });
 }
@@ -315,7 +376,7 @@ $('save').addEventListener('click', async () => {
     situation: $('situation').value.trim() || DEFAULT_COACH.situation,
     profile: $('profile').value.trim().slice(0, PROFILE_MAX_CHARS),
     sessionContext: $('sessionContext').value.trim().slice(0, CONTEXT_MAX_CHARS),
-    phraseIds: [...document.querySelectorAll('.phrase-cb:checked')].map((cb) => cb.value),
+    phraseIds: checkedIds(),
     customPhrases,
     notes: notes.filter((n) => (n.title || '').trim() || (n.body || '').trim()),
   };
@@ -349,6 +410,10 @@ $('save').addEventListener('click', async () => {
   fillModelSelect($('reportModel'), `${s.reportProvider}:${s.reportModel}`);
   customPhrases = Array.isArray(s.customPhrases) ? s.customPhrases : [];
   notes = Array.isArray(s.notes) ? s.notes : [];
+  if (globalThis.speechSynthesis) {
+    globalThis.speechSynthesis.addEventListener('voiceschanged', loadVoices);
+    loadVoices();
+  }
   renderCatalogue(Array.isArray(s.phraseIds) ? s.phraseIds : DEFAULT_PHRASE_IDS);
   renderCustom();
   renderNotes();

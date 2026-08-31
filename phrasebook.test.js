@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   CATALOGUE, DEFAULT_PHRASE_IDS, resolvePhrases, resolveNotes, resolveChips,
-  NOTE_TITLE_MAX, NOTE_BODY_MAX, MAX_NOTES, MAX_CUSTOM, toggleNoteOpen,
+  NOTE_TITLE_MAX, NOTE_BODY_MAX, MAX_NOTES, MAX_CUSTOM, toggleNoteOpen, pickEnglishVoice,
 } from './phrasebook.js';
 
 const allItems = () => CATALOGUE.flatMap((c) => c.items);
@@ -149,4 +149,51 @@ test('toggleNoteOpen on an id that matches nothing changes nothing', () => {
   const settings = { notes: [{ id: 'n.1', title: 'a', body: 'x', open: false }] };
   assert.deepEqual(toggleNoteOpen(settings, 'n.9').notes, settings.notes);
   assert.deepEqual(toggleNoteOpen({}, 'n.9').notes, []);
+});
+
+// --- pronunciation voice ------------------------------------------------------
+// The Web Speech API hands us whatever the OS installed. Choosing badly is worse
+// than staying silent: an English phrase read by a Spanish voice teaches the wrong
+// pronunciation, which is the opposite of what the button is for.
+
+const voice = (name, lang, localService = true) => ({ name, lang, localService });
+
+test('pickEnglishVoice prefers a local voice over a network-backed one', () => {
+  const picked = pickEnglishVoice([
+    voice('Google US English', 'en-US', false),
+    voice('Samantha', 'en-US', true),
+  ]);
+  assert.equal(picked.name, 'Samantha');
+});
+
+test('pickEnglishVoice prefers en-US over another English variant', () => {
+  const picked = pickEnglishVoice([voice('Daniel', 'en-GB'), voice('Samantha', 'en-US')]);
+  assert.equal(picked.name, 'Samantha');
+});
+
+test('pickEnglishVoice accepts any English variant when there is no en-US', () => {
+  const picked = pickEnglishVoice([voice('Karen', 'en-AU'), voice('Mónica', 'es-ES')]);
+  assert.equal(picked.name, 'Karen');
+});
+
+test('pickEnglishVoice falls back to a network voice when no local English exists', () => {
+  const picked = pickEnglishVoice([
+    voice('Mónica', 'es-ES', true),
+    voice('Google UK English', 'en-GB', false),
+  ]);
+  assert.equal(picked.name, 'Google UK English');
+});
+
+test('pickEnglishVoice returns null when no English voice is installed', () => {
+  assert.equal(pickEnglishVoice([voice('Mónica', 'es-ES'), voice('Jorge', 'es-MX')]), null);
+});
+
+test('pickEnglishVoice survives an empty or malformed voice list', () => {
+  assert.equal(pickEnglishVoice([]), null);
+  assert.equal(pickEnglishVoice(), null);
+  assert.equal(pickEnglishVoice([{}, null, { lang: 'en-US', name: 'ok' }]).name, 'ok');
+});
+
+test('pickEnglishVoice is not fooled by a language that merely starts with en', () => {
+  assert.equal(pickEnglishVoice([voice('Enya', 'eng-X'), voice('Mónica', 'es-ES')]), null);
 });
