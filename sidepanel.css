@@ -116,6 +116,15 @@ button.ghost { background: transparent; border-color: var(--border); }
 .nudge { margin: 6px 0 0; font-size: 11.5px; color: var(--muted); font-style: italic; }
 .nudge:empty { display: none; }
 
+.phrases { display: flex; flex-wrap: wrap; gap: 6px; }
+.notes { margin-top: 8px; display: flex; flex-direction: column; gap: 4px; }
+.note-head {
+  width: 100%; text-align: left; background: none; border: 0; cursor: pointer;
+  color: inherit; font: inherit; padding: 3px 0;
+}
+.note-body { margin: 2px 0 6px 14px; white-space: pre-wrap; font-size: 12px; }
+.notes:empty, .phrases:empty { display: none; }
+
 .reply {
   margin-top: 8px; padding: 8px 9px; border-radius: 8px;
   background: var(--bg); border: 1px solid var(--me-border);

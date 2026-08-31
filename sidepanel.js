@@ -1,6 +1,7 @@
 import { DEFAULT_COACH, CONTEXT_MAX_CHARS } from './coach.js';
 import { toSpanish } from './translate.js';
 import { installLive } from './live.js';
+import { resolvePhrases, resolveNotes } from './phrasebook.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -10,6 +11,7 @@ const els = {
   themSource: $('themSource'), themDevice: $('themDevice'), deviceField: $('deviceField'),
   captureMic: $('captureMic'), settings: $('settings'), sessionContext: $('sessionContext'),
   coach: $('coach'), chips: $('chips'), nudge: $('nudge'), hintOpeners: $('hintOpeners'), askReply: $('askReply'),
+  phrases: $('phrases'), notes: $('notes'),
   replyBox: $('replyBox'), replyStatus: $('replyStatus'),
   replyAnswer: $('replyAnswer'), replyIdeas: $('replyIdeas'),
   report: $('report'), analyze: $('analyze'), download: $('download'), clear: $('clear'),
@@ -112,6 +114,51 @@ function showHints({ words = [], nudge = '', openers = [] }) {
     els.chips.append(chip);
   }
   els.nudge.textContent = nudge || '';
+}
+
+// Phrases need no interaction: they are there to be glanced at mid-sentence.
+// Notes are collapsed but remember their state, so the learner opens "Mi daily"
+// before the meeting and never has to click while the other person waits.
+function showChips({ phrases = [], notes = [] }) {
+  els.phrases.textContent = '';
+  for (const p of phrases) {
+    const chip = document.createElement('span');
+    chip.className = 'chip';
+    const en = document.createElement('b');
+    en.textContent = p.en;
+    chip.append(en);
+    if (p.es) {
+      const es = document.createElement('span');
+      es.textContent = ' · ' + p.es;
+      chip.append(es);
+    }
+    els.phrases.append(chip);
+  }
+
+  els.notes.textContent = '';
+  for (const n of notes) {
+    const item = document.createElement('div');
+    item.className = 'note';
+    const head = document.createElement('button');
+    head.className = 'note-head';
+    head.type = 'button';
+    head.textContent = (n.open ? '▾ ' : '▸ ') + (n.title || 'Nota');
+    const body = document.createElement('p');
+    body.className = 'note-body';
+    body.textContent = n.body;
+    body.hidden = !n.open;
+    head.addEventListener('click', () => toggleNote(n.id));
+    item.append(head, body);
+    els.notes.append(item);
+  }
+}
+
+async function toggleNote(id) {
+  const { settings: stored = {} } = await chrome.storage.local.get('settings');
+  const notes = (stored.notes || []).map((n) => (n.id === id ? { ...n, open: !n.open } : n));
+  await chrome.storage.local.set({ settings: { ...stored, notes } });
+  // No re-render here: the write trips storage.onChanged in background.js, which
+  // re-broadcasts COACH_CHIPS to all three views at once.
 }
 
 // What the learner loses when Chrome's on-device recognition is missing depends
@@ -294,6 +341,8 @@ async function init() {
   const { settings: stored = {}, transcript = [], lastError } =
     await chrome.storage.local.get(['settings', 'transcript', 'lastError']);
   settings = { ...DEFAULT_COACH, ...stored };
+  // First paint without waiting for a broadcast; COACH_CHIPS keeps it live afterwards.
+  showChips({ phrases: resolvePhrases(settings), notes: resolveNotes(settings) });
   els.lang.value = settings.lang || 'en';
   els.themSource.value = settings.themSource || 'tab';
   els.captureMic.checked = settings.captureMic !== false;
@@ -400,6 +449,7 @@ chrome.runtime.onMessage.addListener((msg) => {
     showLiveNote(msg);
   }
   else if (msg.type === 'HINTS') showHints(msg);
+  else if (msg.type === 'COACH_CHIPS') showChips(msg);
   else if (msg.type === 'REPLY') showReply(msg);
   else if (msg.type === 'STATUS') setStatus(msg.text, msg.kind);
   else if (msg.type === 'RUNNING') { setRunning(msg.running); if (!msg.running) showPartial(''); }
