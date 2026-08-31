@@ -179,10 +179,19 @@ export function parseJsonLoose(text) {
 // Groq's free tier allows 8000 tokens per minute across input and output. A report
 // carrying the whole transcript eats that and returns 429, so the oldest turns are
 // trimmed until it fits. Four characters per token is the usual rule of thumb.
-export function turnsToText(turns, limit = 10, maxChars = Infinity) {
+// A Whisper repetition loop ("be able to" two hundred times) arrives as ONE segment,
+// which MERGE_MAX_CHARS does not bound — that caps folding, not a single transcription.
+// Left whole, one such turn is thousands of characters and dominates every prompt it
+// reaches, so each turn contributes at most maxTurnChars.
+const clip = (text, max) => {
+  const t = String(text ?? '');
+  return t.length <= max ? t : `${t.slice(0, max)}…`;
+};
+
+export function turnsToText(turns, limit = 10, maxChars = Infinity, maxTurnChars = Infinity) {
   const lines = turns
     .slice(-limit)
-    .map((t) => `${t.speaker === 'me' ? 'LEARNER' : 'OTHER'}: ${t.text}`);
+    .map((t) => `${t.speaker === 'me' ? 'LEARNER' : 'OTHER'}: ${clip(t.text, maxTurnChars)}`);
   if (maxChars === Infinity) return lines.join('\n');
 
   const kept = [];
@@ -197,6 +206,18 @@ export function turnsToText(turns, limit = 10, maxChars = Infinity) {
 
 // Leaves room for the system prompt and the 2800 output tokens within the free minute.
 const REPORT_MAX_CHARS = 12000;
+
+// Every call that constrains the answer to a schema shares this budget. gpt-oss models
+// spend reasoning tokens from max_completion_tokens BEFORE they write the JSON, so a
+// tight cap truncates the object mid-key and Groq rejects the whole call with 400
+// json_validate_failed. 1200 is the figure that stopped it for the reply in v1.17.1;
+// the chips and the starter kept the old cap and hit the same 400 in production.
+const JSON_BUDGET = 1200;
+
+// The chips run every few seconds, so they carry the tightest transcript of the three:
+// the whole live round has to fit inside the free tier's minute next to everything else.
+const HINTS_MAX_CHARS = 1200;
+const HINTS_MAX_TURN_CHARS = 400;
 
 // Spanish-session override, appended to the live prompts: same structure and
 // fields, but the phrases to say are Spanish and a gloss is pointless for a
@@ -267,8 +288,8 @@ export async function askHints({ turns, settings }) {
     model: settings.liveModel,
     keys: settings,
     system: HINT_SYSTEM + langMode(settings),
-    user: `Learner level: ${settings.level}. Context: ${settings.situation}.\n\nConversation so far:\n${turnsToText(turns, 8)}`,
-    maxTokens: 700,
+    user: `Learner level: ${settings.level}. Context: ${settings.situation}.\n\nConversation so far:\n${turnsToText(turns, 8, HINTS_MAX_CHARS, HINTS_MAX_TURN_CHARS)}`,
+    maxTokens: JSON_BUDGET,
     schema: HINT_SCHEMA,
   });
   return parseHints(raw);
@@ -295,7 +316,7 @@ export async function askStarter({ settings }) {
     keys: settings,
     system: STARTER_SYSTEM + langMode(settings),
     user: `Learner level: ${settings.level}. Situation: ${settings.situation}.${contextBlock(settings)}`,
-    maxTokens: 700,
+    maxTokens: JSON_BUDGET,
     schema: HINT_SCHEMA,
   });
   return parseHints(raw);
@@ -378,10 +399,7 @@ export async function askReply({ turns, settings }) {
       // cap keeps it whole while bounding cost and latency.
       + `\n\nConversation so far:\n${turnsToText(turns, 10, 1200)}`
       + `\n\nAnswer the other person's last turn for the learner: one speakable answer, then two study ideas.`,
-    // The JSON itself is ~200 tokens, but gpt-oss models spend reasoning tokens
-    // from the same budget BEFORE writing it: a tight cap truncates the JSON and
-    // Groq rejects the call with 400 json_validate_failed.
-    maxTokens: 1200,
+    maxTokens: JSON_BUDGET,
     schema: REPLY_SCHEMA,
   });
   return parseReply(raw);

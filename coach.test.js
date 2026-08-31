@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseReply, parseHints, turnsToText, contextBlock, CONTEXT_MAX_CHARS } from './coach.js';
+import { parseReply, parseHints, turnsToText, contextBlock, CONTEXT_MAX_CHARS, askHints, askStarter } from './coach.js';
 
 test('parseReply returns one speakable answer and two study ideas, cleaned', () => {
   const raw = JSON.stringify({
@@ -85,4 +85,67 @@ test('contextBlock carries the notes, capped at the limit', () => {
   const long = contextBlock({ sessionContext: 'x'.repeat(CONTEXT_MAX_CHARS + 500) });
   assert.ok(!long.includes('x'.repeat(CONTEXT_MAX_CHARS + 1)));
   assert.ok(long.includes('x'.repeat(CONTEXT_MAX_CHARS)));
+});
+
+// --- Regression: Groq 400 json_validate_failed on the live chips ---------------
+// gpt-oss spends reasoning tokens from max_completion_tokens before it writes the
+// JSON. Commit 0f63f92 proved a tight cap truncates the object and Groq rejects
+// the call with json_validate_failed; the chips kept the cap that reply had shed.
+
+function stubGroq(capture) {
+  const original = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    capture.url = url;
+    capture.body = JSON.parse(init.body);
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        choices: [{ message: { content: JSON.stringify({ words: [{ en: 'so far', es: 'hasta ahora' }], openers: [], nudge: '' }) } }],
+      }),
+    };
+  };
+  return () => { globalThis.fetch = original; };
+}
+
+const LIVE_SETTINGS = {
+  liveProvider: 'groq',
+  liveModel: 'openai/gpt-oss-20b',
+  groqKey: 'gsk_test_key_for_unit_tests',
+  level: 'B1-B2',
+  situation: 'conversación de trabajo en inglés',
+  lang: 'en',
+};
+
+test('askHints leaves gpt-oss room to reason before the JSON', async () => {
+  const seen = {};
+  const restore = stubGroq(seen);
+  try {
+    await askHints({ turns: [{ speaker: 'them', text: 'How is the app going?' }], settings: LIVE_SETTINGS });
+  } finally { restore(); }
+  assert.ok(
+    seen.body.max_completion_tokens >= 1200,
+    `chips asked for ${seen.body.max_completion_tokens} completion tokens; reasoning leaves too few for the JSON`,
+  );
+});
+
+test('askStarter leaves gpt-oss room to reason before the JSON', async () => {
+  const seen = {};
+  const restore = stubGroq(seen);
+  try {
+    await askStarter({ settings: LIVE_SETTINGS });
+  } finally { restore(); }
+  assert.ok(seen.body.max_completion_tokens >= 1200, `starter asked for ${seen.body.max_completion_tokens}`);
+});
+
+test('askHints bounds the conversation it sends, even on a Whisper repetition loop', async () => {
+  const loop = { speaker: 'me', text: "I'm not sure if I'm going to " + 'be able to '.repeat(400) };
+  const turns = Array.from({ length: 8 }, () => loop);
+  const seen = {};
+  const restore = stubGroq(seen);
+  try {
+    await askHints({ turns, settings: LIVE_SETTINGS });
+  } finally { restore(); }
+  const user = seen.body.messages.find((m) => m.role === 'user').content;
+  assert.ok(user.length < 4000, `chips prompt grew to ${user.length} chars; a repetition loop is unbounded`);
 });
