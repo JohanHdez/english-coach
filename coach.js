@@ -18,8 +18,6 @@ export const PROVIDERS = {
 
 export const DEFAULT_COACH = {
   liveCoach: true,
-  liveProvider: 'groq',
-  liveModel: 'openai/gpt-oss-20b',
   reportProvider: 'groq',
   reportModel: 'openai/gpt-oss-120b',
   autoReport: true,
