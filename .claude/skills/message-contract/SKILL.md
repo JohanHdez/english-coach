@@ -44,7 +44,7 @@ overlay / sidepanel / setup ──► background ──► offscreen ──► w
 `CONTEXT_CHANGED` (the stored `sessionContext` was edited; regenerates the starter chips while
 no real hints round has painted yet).
 
-**offscreen → ui** (`target: 'ui'`, broadcast, mirrored into the tab)
+**offscreen / background → ui** (`target: 'ui'`, broadcast, mirrored into the tab)
 
 | Type | Payload | Consumed by |
 |---|---|---|
@@ -52,6 +52,7 @@ no real hints round has painted yet).
 | `STATUS` | `text`, `kind` (`info`/`ok`/`error`/`loading`), `show?` to force the overlay open | overlay, sidepanel |
 | `SEGMENT` | `entry` (`speaker`, `text`, `t`, `dur`); a repeated (`speaker`, `t`) is a turn extended by folding — UIs upsert, not append | overlay, sidepanel |
 | `HINTS` | `words[]`, `openers[]` (each `{en, es}`), `nudge` | overlay, sidepanel |
+| `COACH_CHIPS` | `phrases[]` (`{id, en, es}`), `notes[]` (`{id, title, body, open}`) | overlay, sidepanel |
 | `REPLY` | `answer[]` (one item; its key term wrapped in `**`), `ideas[]` (each `{en, es}`), or `pending`, or `error` | overlay, sidepanel |
 | `QUEUE` | `pending` | overlay, sidepanel |
 | `PARTIAL` | `text` (English, provisional) | overlay, sidepanel |
@@ -88,3 +89,7 @@ no real hints round has painted yet).
 9. **`LIVE_STATE` is cached in `lastUi`**, unlike `PARTIAL`. It describes a condition that holds
    for the whole session, not a delta: an overlay injected after a page reload must come back
    knowing the word-by-word layer is off, or it silently promises text that is never coming.
+10. **`COACH_CHIPS` comes from `background`, not offscreen.** It is derived from `settings`, not
+    from the session, so it is broadcast on `START`, on `UI_SYNC`, and on any `storage.onChanged`
+    touching `phraseIds`, `customPhrases`, `notes` or `liveCoach` — and it is *not* cleared when a
+    session ends.

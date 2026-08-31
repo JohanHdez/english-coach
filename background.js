@@ -1,6 +1,8 @@
 // Service worker: coordinates the side panel, the in-page overlay and the
 // offscreen document (which does the recording, transcribing and coaching).
 
+import { resolvePhrases, resolveNotes } from './phrasebook.js';
+
 const OFFSCREEN_URL = 'offscreen.html';
 
 // The tab currently showing the overlay, plus the last broadcast state, so the
@@ -8,7 +10,7 @@ const OFFSCREEN_URL = 'offscreen.html';
 let sessionTabId = null;
 let running = false;
 let coachWindowId = null;
-const lastUi = { hints: null, reply: null, status: null, live: null };
+const lastUi = { hints: null, chips: null, reply: null, status: null, live: null };
 
 // When a tab is shared, Chrome can leave the user in a window with no side panel
 // and no extension bar: a system notification is the only thing they are
@@ -140,18 +142,16 @@ if (chrome.commands?.onCommand) {
   });
 }
 
-// The offscreen document re-reads settings on every coach call, but the starter
-// kit is event-driven: forward the edit so notes typed mid-session (side panel
-// or Settings) regenerate the opening chips. The offscreen document decides
-// whether a session is actually running — module state here is ephemeral.
-chrome.storage.onChanged.addListener(async (changes, area) => {
+// Chips come from settings, so any edit to them — Settings page, side panel, or a
+// note toggled open during a session — has to reach the three views.
+const CHIP_KEYS = ['phraseIds', 'customPhrases', 'notes', 'liveCoach'];
+
+chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== 'local' || !changes.settings) return;
-  const antes = changes.settings.oldValue?.sessionContext || '';
-  const ahora = changes.settings.newValue?.sessionContext || '';
-  if (antes === ahora) return;
-  if (await hasOffscreen()) {
-    chrome.runtime.sendMessage({ target: 'offscreen', type: 'CONTEXT_CHANGED' }).catch(() => {});
-  }
+  const before = changes.settings.oldValue || {};
+  const after = changes.settings.newValue || {};
+  const touched = CHIP_KEYS.some((k) => JSON.stringify(before[k]) !== JSON.stringify(after[k]));
+  if (touched) broadcastChips();
 });
 
 async function hasOffscreen() {
@@ -197,6 +197,23 @@ function relayToTab(msg) {
   chrome.tabs.sendMessage(sessionTabId, msg).catch(() => {});
 }
 
+// Chips are settings state, not session state: they no longer come from a model,
+// so the service worker owns them. It is the only context with both chrome.storage
+// and chrome.tabs — the offscreen document has neither, and the overlay has no
+// storage. Broadcast whether or not a session is running.
+async function broadcastChips() {
+  const { settings = {} } = await chrome.storage.local.get('settings');
+  const msg = {
+    target: 'ui',
+    type: 'COACH_CHIPS',
+    phrases: settings.liveCoach === false ? [] : resolvePhrases(settings),
+    notes: settings.liveCoach === false ? [] : resolveNotes(settings),
+  };
+  lastUi.chips = msg;
+  chrome.runtime.sendMessage(msg).catch(() => {});
+  relayToTab(msg);
+}
+
 // Injects the overlay into a tab and brings it up to date. Called on start, on
 // tab switch and after every reload, so the bar is never lost.
 async function attachOverlay(tabId) {
@@ -209,6 +226,7 @@ async function attachOverlay(tabId) {
   try {
     await chrome.tabs.sendMessage(tabId, { target: 'ui', type: 'RUNNING', running: true });
     if (lastUi.live) await chrome.tabs.sendMessage(tabId, lastUi.live);
+    if (lastUi.chips) await chrome.tabs.sendMessage(tabId, lastUi.chips);
     if (lastUi.hints) await chrome.tabs.sendMessage(tabId, lastUi.hints);
     if (lastUi.reply) await chrome.tabs.sendMessage(tabId, lastUi.reply);
   } catch { /* la pestaña no admite overlay */ }
@@ -368,6 +386,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             }
             throw e;
           }
+          broadcastChips();
           if (merged.floatingWindow === true) await openCoachWindow();
           sendResponse({ ok: true });
           break;
@@ -397,6 +416,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             running,
             turns: transcript.slice(-12),
             hints: lastUi.hints,
+            chips: lastUi.chips,
             reply: lastUi.reply,
             status: lastUi.status,
             live: lastUi.live,
