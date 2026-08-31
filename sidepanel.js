@@ -1,7 +1,7 @@
 import { DEFAULT_COACH, CONTEXT_MAX_CHARS } from './coach.js';
 import { toSpanish } from './translate.js';
 import { installLive } from './live.js';
-import { resolveChips } from './phrasebook.js';
+import { resolveChips, toggleNoteOpen } from './phrasebook.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -90,7 +90,20 @@ function setRunning(v) {
   els.themSource.disabled = v;
   els.themDevice.disabled = v;
   els.captureMic.disabled = v;
-  els.coach.hidden = !(v && settings.liveCoach);
+  syncCoach();
+}
+
+// The two halves of the coach answer to different things. The lanes are settings,
+// so they show with no session at all; resolveChips already empties them when
+// liveCoach is off, which is why their visibility is read off their own content
+// instead of a second copy of that rule. The reply needs a running session —
+// exactly how the overlay gates it on .card.idle — so the panel, the floating
+// window and the page overlay agree about what is on screen when.
+function syncCoach() {
+  const lanes = els.phrases.childElementCount > 0 || els.notes.childElementCount > 0;
+  els.askReply.hidden = !running;
+  if (!running) els.replyBox.hidden = true;
+  els.coach.hidden = !(lanes || running);
 }
 
 // ------------------------------------------------------------------- coach
@@ -130,12 +143,12 @@ function showChips({ phrases = [], notes = [] }) {
     item.append(head, body);
     els.notes.append(item);
   }
+  syncCoach();
 }
 
 async function toggleNote(id) {
   const { settings: stored = {} } = await chrome.storage.local.get('settings');
-  const notes = (stored.notes || []).map((n) => (n.id === id ? { ...n, open: !n.open } : n));
-  await chrome.storage.local.set({ settings: { ...stored, notes } });
+  await chrome.storage.local.set({ settings: toggleNoteOpen(stored, id) });
   // No re-render here: the write trips storage.onChanged in background.js, which
   // re-broadcasts COACH_CHIPS to all three views at once.
 }
@@ -258,13 +271,15 @@ function fillGroup(box, items, rich = false) {
 }
 
 function showReply({ answer = [], ideas = [], pending = false, error = '' } = {}) {
-  els.coach.hidden = false;
-  els.replyBox.hidden = false;
   const aviso = pending ? 'Pensando…' : error;
   els.replyStatus.textContent = aviso;
   els.replyStatus.hidden = !aviso;
   fillGroup(els.replyAnswer, pending || error ? [] : answer, true);
   fillGroup(els.replyIdeas, pending || error ? [] : ideas);
+  els.replyBox.hidden = false;
+  // syncCoach has the last word: a reply that lands after the session ended must
+  // not reopen the section, or the panel would show what the overlay hides.
+  syncCoach();
 }
 
 // The heavy lifting lives in the offscreen document: the panel only asks and paints.

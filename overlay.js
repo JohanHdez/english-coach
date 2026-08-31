@@ -111,8 +111,14 @@
     .chip b { font-weight: 600; }
     .chip i { color: #9aa0a6; font-style: normal; font-size: 11px; }
 
-    .phrases { display: flex; flex-wrap: wrap; gap: 5px; }
-    .notes { display: flex; flex-direction: column; gap: 3px; margin-top: 6px; }
+    /* Capped like .reply below, and for the same reason the .body comment gives:
+       the lanes are pinned, .turns is the only thing that can shrink, and its
+       automatic minimum is 0. Unbounded lanes would collapse the conversation and
+       then be clipped by .body's overflow:hidden with nothing left to scroll. */
+    .phrases { display: flex; flex-wrap: wrap; gap: 5px;
+      max-height: 25%; min-height: 0; overflow-y: auto; }
+    .notes { display: flex; flex-direction: column; gap: 3px; margin-top: 6px;
+      max-height: 30%; min-height: 0; overflow-y: auto; }
     .note-head {
       width: 100%; text-align: left; background: none; border: 0; cursor: pointer;
       color: #e8eaed; font: inherit; font-size: 12px; padding: 2px 0;
@@ -158,8 +164,10 @@
     .reply-group.ideas .reply-item { font-size: 11.5px; opacity: .9; }
     .reply-group.ideas .reply-item b { font-weight: 400; }
 
+    /* A floor, not just a scrollbar: without it the lanes and the reply would take
+       everything and the conversation would be laid out at zero height. */
     .turns { margin-top: 10px; display: flex; flex-direction: column; gap: 5px;
-      flex: 1; min-height: 0; overflow-y: auto; }
+      flex: 1; min-height: 72px; overflow-y: auto; }
     .turn { font-size: 12px; padding: 5px 8px; border-radius: 8px; background: #24272d; }
     .turn.me { background: #1e3a5f; }
     .turn span { display: block; font-size: 10px; color: #9aa0a6; }

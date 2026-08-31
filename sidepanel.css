@@ -97,9 +97,15 @@ button.danger { color: var(--danger); }
   color: var(--accent, #2f6fed); text-decoration: underline; cursor: pointer;
 }
 
+/* Bounded on purpose. The coach sits above the conversation, and .transcript is a
+   scroll container, so its automatic minimum is 0: an unbounded lane — 38 ticked
+   phrases, or a 2000-character note — would squeeze the conversation to nothing
+   and then push the footer past the viewport. Each lane scrolls inside its own
+   cap instead, and the whole region has one of its own as a backstop. */
 .coach {
   padding: 9px 12px; border-bottom: 1px solid var(--border);
   background: color-mix(in srgb, var(--accent) 7%, var(--bg));
+  max-height: 45vh; overflow-y: auto;
 }
 .coach-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
 .coach-title { font-size: 10.5px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 600; }
@@ -112,8 +118,8 @@ button.ghost { background: transparent; border-color: var(--border); }
 .chip b { font-weight: 600; }
 .chip span { color: var(--muted); font-size: 11px; }
 
-.phrases { display: flex; flex-wrap: wrap; gap: 6px; }
-.notes { margin-top: 8px; display: flex; flex-direction: column; gap: 4px; }
+.phrases { display: flex; flex-wrap: wrap; gap: 6px; max-height: 18vh; overflow-y: auto; }
+.notes { margin-top: 8px; display: flex; flex-direction: column; gap: 4px; max-height: 22vh; overflow-y: auto; }
 .note-head {
   width: 100%; text-align: left; background: none; border: 0; cursor: pointer;
   color: inherit; font: inherit; padding: 3px 0;
@@ -127,7 +133,10 @@ button.ghost { background: transparent; border-color: var(--border); }
 }
 .reply p { margin: 0 0 6px; font-size: 13px; }
 
-.transcript { flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+/* min-height is the floor that makes the cap above a guarantee: a flex item with a
+   0 basis contributes nothing to shrinking, so without it the conversation is the
+   first thing laid out at zero height. */
+.transcript { flex: 1; min-height: 120px; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
 .empty { color: var(--muted); font-size: 12px; text-align: center; margin-top: 24px; }
 
 .bubble {

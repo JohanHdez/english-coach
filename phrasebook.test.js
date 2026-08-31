@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   CATALOGUE, DEFAULT_PHRASE_IDS, resolvePhrases, resolveNotes, resolveChips,
-  NOTE_TITLE_MAX, NOTE_BODY_MAX, MAX_NOTES, MAX_CUSTOM,
+  NOTE_TITLE_MAX, NOTE_BODY_MAX, MAX_NOTES, MAX_CUSTOM, toggleNoteOpen,
 } from './phrasebook.js';
 
 const allItems = () => CATALOGUE.flatMap((c) => c.items);
@@ -117,4 +117,36 @@ test('resolveChips returns content when liveCoach is true', () => {
   assert.deepEqual(out.phrases.map((p) => p.id), ['time.second']);
   assert.equal(out.notes.length, 1);
   assert.equal(out.notes[0].id, 'n.1');
+});
+
+test('toggleNoteOpen flips the targeted note and returns a new settings object', () => {
+  const settings = {
+    liveCoach: true,
+    notes: [{ id: 'n.1', title: 'Mi daily', body: 'x', open: false }],
+  };
+  const out = toggleNoteOpen(settings, 'n.1');
+  assert.equal(out.notes[0].open, true);
+  assert.equal(settings.notes[0].open, false, 'the input must not be mutated');
+  assert.notEqual(out, settings);
+  assert.equal(out.liveCoach, true, 'the rest of settings survives');
+  assert.equal(toggleNoteOpen(out, 'n.1').notes[0].open, false);
+});
+
+test('toggleNoteOpen leaves the other notes untouched', () => {
+  const settings = {
+    notes: [
+      { id: 'n.1', title: 'a', body: 'x', open: true },
+      { id: 'n.2', title: 'b', body: 'y', open: false },
+      { id: 'n.3', title: 'c', body: 'z', open: true },
+    ],
+  };
+  const out = toggleNoteOpen(settings, 'n.2');
+  assert.deepEqual(out.notes.map((n) => n.open), [true, true, true]);
+  assert.deepEqual(out.notes.map((n) => n.title), ['a', 'b', 'c']);
+});
+
+test('toggleNoteOpen on an id that matches nothing changes nothing', () => {
+  const settings = { notes: [{ id: 'n.1', title: 'a', body: 'x', open: false }] };
+  assert.deepEqual(toggleNoteOpen(settings, 'n.9').notes, settings.notes);
+  assert.deepEqual(toggleNoteOpen({}, 'n.9').notes, []);
 });

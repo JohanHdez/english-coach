@@ -111,3 +111,12 @@ export function resolveChips(settings = {}) {
   if (settings.liveCoach === false) return { phrases: [], notes: [] };
   return { phrases: resolvePhrases(settings), notes: resolveNotes(settings) };
 }
+
+// Flipping a note open is a settings write, and it happens from two contexts that
+// share no code: the side panel (chrome.storage) and the overlay via the service
+// worker (TOGGLE_NOTE). Keeping the read-modify-write here means one definition
+// and one set of tests instead of two copies drifting apart.
+export function toggleNoteOpen(settings = {}, id) {
+  const notes = Array.isArray(settings.notes) ? settings.notes : [];
+  return { ...settings, notes: notes.map((n) => (n && n.id === id ? { ...n, open: !n.open } : n)) };
+}

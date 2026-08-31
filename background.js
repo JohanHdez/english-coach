@@ -1,7 +1,7 @@
 // Service worker: coordinates the side panel, the in-page overlay and the
 // offscreen document (which does the recording, transcribing and coaching).
 
-import { resolveChips } from './phrasebook.js';
+import { resolveChips, toggleNoteOpen } from './phrasebook.js';
 
 const OFFSCREEN_URL = 'offscreen.html';
 
@@ -151,7 +151,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
   const before = changes.settings.oldValue || {};
   const after = changes.settings.newValue || {};
   const touched = CHIP_KEYS.some((k) => JSON.stringify(before[k]) !== JSON.stringify(after[k]));
-  if (touched) broadcastChips();
+  if (touched) broadcastChips().catch(() => {});
 });
 
 async function hasOffscreen() {
@@ -378,7 +378,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             }
             throw e;
           }
-          broadcastChips();
+          broadcastChips().catch(() => {});
           if (merged.floatingWindow === true) await openCoachWindow();
           sendResponse({ ok: true });
           break;
@@ -407,7 +407,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           sendResponse({
             running,
             turns: transcript.slice(-12),
-            chips: lastUi.chips,
+            // lastUi is module state and is gone after a worker suspension, but the
+            // chips derive from settings, which is already in hand: rebuild rather
+            // than answer a reinjected overlay with an empty lane.
+            chips: lastUi.chips || { target: 'ui', type: 'COACH_CHIPS', ...resolveChips(settings) },
             reply: lastUi.reply,
             status: lastUi.status,
             live: lastUi.live,
@@ -428,8 +431,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         // Only the write happens — storage.onChanged re-broadcasts COACH_CHIPS.
         case 'TOGGLE_NOTE': {
           const { settings = {} } = await chrome.storage.local.get('settings');
-          const notes = (settings.notes || []).map((n) => (n.id === msg.id ? { ...n, open: !n.open } : n));
-          await chrome.storage.local.set({ settings: { ...settings, notes } });
+          await chrome.storage.local.set({ settings: toggleNoteOpen(settings, msg.id) });
           sendResponse({ ok: true });
           break;
         }
