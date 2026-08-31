@@ -68,7 +68,7 @@ export const anthropicBaseOf = (s = {}) => (s.anthropicBase || ANTHROPIC_DEFAULT
 // Only the gpt-oss models accept json_schema with constrained decoding, the one
 // mode that cannot return invalid JSON. json_object validates after generation, and
 // these models leak reasoning tokens into the output: Groq rejects it with
-// json_validate_failed and the whole round of chips is lost.
+// json_validate_failed and the suggested reply is lost.
 const SUPPORTS_JSON_SCHEMA = /^openai\/gpt-oss/;
 
 function groqResponseFormat(model, schema) {
@@ -214,7 +214,7 @@ const TURN_MAX_CHARS = 400;
 // spend reasoning tokens from max_completion_tokens BEFORE they write the JSON, so a
 // tight cap truncates the object mid-key and Groq rejects the whole call with 400
 // json_validate_failed. 1200 is the figure that stopped it for the reply in v1.17.1;
-// the chips and the starter kept the old cap and hit the same 400 in production.
+// the now-deleted per-turn call kept the old cap and hit the same 400 in production.
 const JSON_BUDGET = 1200;
 
 // Spanish-session override, appended to the reply prompt: same structure and
@@ -225,7 +225,7 @@ const SPANISH_MODE = `
 IMPORTANT OVERRIDE: this conversation is in SPANISH, the learner's NATIVE language. They need
 professional support (what to say, how to phrase it well in a work setting), not language help.
 Every "en" field must contain the SPANISH phrase to say, in professional spoken register.
-Return "es" as an empty string. "nudge" stays in Spanish.`;
+Return "es" as an empty string.`;
 
 const langMode = (settings) => (settings.lang === 'es' ? SPANISH_MODE : '');
 
