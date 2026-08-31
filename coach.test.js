@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseReply, parseHints, turnsToText, contextBlock, CONTEXT_MAX_CHARS, askHints, askStarter, askReply } from './coach.js';
+import { parseReply, parseHints, turnsToText, contextBlock, CONTEXT_MAX_CHARS, askHints, askStarter, askReply, askReport } from './coach.js';
 
 test('parseReply returns one speakable answer and two study ideas, cleaned', () => {
   const raw = JSON.stringify({
@@ -172,4 +172,19 @@ test('askReply clips a repetition-loop turn out of its prompt', async () => {
   const user = seen.body.messages.find((m) => m.role === 'user').content;
   assert.ok(!user.includes('be able to '.repeat(50)), 'the repetition loop reached the prompt whole');
   assert.ok(user.length < 2500, `reply prompt grew to ${user.length} chars`);
+});
+
+test('askReport marks the transcript partial when a turn is clipped, even if none is dropped', async () => {
+  // Short enough that no turn is dropped for REPORT_MAX_CHARS, long enough that this
+  // one turn alone crosses TURN_MAX_CHARS and gets truncated by clip().
+  const loop = { speaker: 'me', text: 'be able to '.repeat(60) };
+  const turns = [{ speaker: 'them', text: 'How did the migration go?' }, loop];
+  const seen = {};
+  const restore = stubGroq(seen, 'Informe de prueba.');
+  try {
+    await askReport({ turns, settings: REPLY_SETTINGS });
+  } finally { restore(); }
+  const user = seen.body.messages.find((m) => m.role === 'user').content;
+  assert.ok(!user.includes('Transcripción completa'), 'a clipped turn is reported as a complete transcript');
+  assert.ok(user.includes('sólo la parte final de la conversación'), 'a clipped turn should mark the transcript as partial');
 });

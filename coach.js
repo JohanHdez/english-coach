@@ -400,8 +400,9 @@ export async function askReply({ turns, settings }) {
     user: `Learner level: ${settings.level}. Context: ${settings.situation}.`
       + `${profileBlock(settings)}${contextBlock(settings)}`
       // Capped by characters, not turns: soft cuts split one long question into
-      // many small segments, so a turn count could drop the question itself. The
-      // cap keeps it whole while bounding cost and latency.
+      // many small segments, so a turn count could drop the question itself. Below
+      // TURN_MAX_CHARS a turn stays whole; past it, clip() truncates mid-content so a
+      // single repetition loop can't dominate the budget.
       + `\n\nConversation so far:\n${turnsToText(turns, 10, 1200, TURN_MAX_CHARS)}`
       + `\n\nAnswer the other person's last turn for the learner: one speakable answer, then two study ideas.`,
     maxTokens: JSON_BUDGET,
@@ -493,7 +494,10 @@ export async function askReport({ turns, settings }) {
   const mine = turns.filter((t) => t.speaker === 'me').length;
   if (mine === 0) throw new CoachError('No hay intervenciones tuyas para analizar.');
   const texto = turnsToText(turns, 400, REPORT_MAX_CHARS, TURN_MAX_CHARS);
-  const recortada = texto.split('\n').length < turns.length;
+  // A turn can be clipped mid-content by TURN_MAX_CHARS without ever being dropped, so
+  // a shrinking line count alone misses it — check the raw turns for one over the cap too.
+  const recortada = texto.split('\n').length < turns.length
+    || turns.some((t) => String(t.text ?? '').length > TURN_MAX_CHARS);
   return ask({
     provider: settings.reportProvider,
     model: settings.reportModel,
