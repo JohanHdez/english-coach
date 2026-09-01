@@ -11,6 +11,7 @@
       <div class="brand">
         <span class="dot" id="dot"></span>
         <h1>English Coach</h1>
+        <span class="clock" id="clock" hidden></span>
       </div>
       <button id="settings" class="icon" title="Ajustes">⚙</button>
     </header>
@@ -57,12 +58,18 @@
     </section>
 
     <section id="coach" class="coach" hidden>
-      <div class="coach-head">
-        <span class="coach-title">Coach</span>
+      <div class="tabs">
+        <button id="tabPhrases" class="tab" type="button">Frases <span class="count"></span></button>
+        <button id="tabNotes" class="tab" type="button">Notas <span class="count"></span></button>
         <button id="askReply" class="small ghost" title="También con ⌘⇧E / Ctrl+Shift+E">💡 Respuesta</button>
       </div>
-      <div id="phrases" class="phrases"></div>
-      <div id="notes" class="notes"></div>
+      <div id="phrasesPane" class="pane">
+        <div id="cats" class="cats"></div>
+        <div id="phrases" class="chip-list"></div>
+      </div>
+      <div id="notesPane" class="pane" hidden>
+        <div id="notes" class="note-list"></div>
+      </div>
       <div id="replyBox" class="reply" hidden>
         <p id="replyStatus" class="reply-status" hidden></p>
         <div id="replyAnswer" class="reply-group" hidden>
@@ -76,9 +83,15 @@
       </div>
     </section>
 
-    <section id="transcript" class="transcript">
-      <p class="empty">Aquí aparecerá la conversación transcrita.</p>
-    </section>
+    <div class="transcript-wrap">
+      <section id="transcript" class="transcript">
+        <p class="empty">Aquí aparecerá la conversación transcrita.</p>
+      </section>
+      <div class="overlays">
+        <button id="jump" class="jump" type="button" hidden></button>
+        <div id="sticky" class="sticky" hidden></div>
+      </div>
+    </div>
 
     <div id="partial" class="partial" hidden>
       <span class="meta">Interlocutor · hablando ahora</span>
@@ -87,7 +100,10 @@
     </div>
 
     <footer>
-      <button id="report" class="primary small">📊 Informe de la sesión</button>
+      <div class="row">
+        <button id="pause" class="small" hidden>⏸ Pausar</button>
+        <button id="report" class="primary small">📊 Informe de la sesión</button>
+      </div>
       <div class="row">
         <button id="analyze" class="small">Copiar prompt</button>
         <button id="download" class="small">Descargar</button>

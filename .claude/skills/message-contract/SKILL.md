@@ -27,31 +27,36 @@ overlay / sidepanel / setup ──► background ──► offscreen ──► w
 | Type | Payload | Effect |
 |---|---|---|
 | `START` | `settings?`, `quiet?` | starts a session; fails for tab audio without an invocation. `quiet` (overlay) suppresses the failure notification and popup — the sender paints the error itself |
-| `STOP` | — | stops the session; triggers the auto report |
+| `STOP` | — | ends the session; triggers the auto report |
+| `PAUSE` | — | stops the audio reaching the segmenters. The session, the streams and the tab-capture invocation stay alive, and no report is written |
+| `RESUME` | — | audio flows again and the live layer is restarted from the stream that was never released |
 | `SUGGEST_REPLY` | — | forwards to offscreen; answer arrives as a `REPLY` broadcast |
 | `REPORT` | — | forwards to offscreen; generates and opens the report |
 | `PING_STATE` | — | `{ running, pending }`, asked from offscreen if it exists |
-| `UI_SYNC` | — | full snapshot for a freshly injected overlay |
+| `UI_SYNC` | — | full snapshot for a freshly injected overlay: `running`, `startedAt`, `turns`, `chips`, `reply`, `status`, `live`, `paused`, `translate`, `pillPos`, `pillHidden` (resolved against the *sender's* host) |
 | `OPEN_WINDOW` | — | opens or focuses the floating coach window |
 | `OPEN_REPORT` | — | opens `report.html` in a tab |
 | `SHUTDOWN` | — | closes the offscreen document |
 | `STORE_GET` | `keys` | offscreen's only route to `chrome.storage` |
 | `STORE_SET` | `items` | as above |
 | `TOGGLE_NOTE` | `id` | flips a note's `open` in settings; the write re-broadcasts `COACH_CHIPS` |
+| `PILL_POS` | `pos` (`{right, bottom}` from the corner) | parks the idle pill; the overlay has no storage of its own |
+| `PILL_HIDE` | `host` | adds the sender's hostname to `pillHiddenHosts`. Only the idle pill goes; the card still opens from the icon, the shortcut or the context menu |
 
 **background → offscreen** (`target: 'offscreen'`)
 
-`START` (`streamId`, `streamKind`, `settings`), `STOP`, `SUGGEST_REPLY`, `REPORT`, `STATE`.
+`START` (`streamId`, `streamKind`, `settings`), `STOP`, `PAUSE`, `RESUME`, `SUGGEST_REPLY`, `REPORT`, `STATE`.
 
 **offscreen / background → ui** (`target: 'ui'`, broadcast, mirrored into the tab)
 
 | Type | Payload | Consumed by |
 |---|---|---|
-| `RUNNING` | `running` | overlay, sidepanel, and `background` to track session state |
+| `RUNNING` | `running`, `session` (the start timestamp, identifying the conversation) | overlay, sidepanel, and `background` to track session state |
 | `STATUS` | `text`, `kind` (`info`/`ok`/`error`/`loading`), `show?` to force the overlay open | overlay, sidepanel |
 | `SEGMENT` | `entry` (`speaker`, `text`, `t`, `dur`); a repeated (`speaker`, `t`) is a turn extended by folding — UIs upsert, not append | overlay, sidepanel |
-| `COACH_CHIPS` | `phrases[]` (`{id, en, es}`), `notes[]` (`{id, title, body, open}`) | overlay, sidepanel |
+| `COACH_CHIPS` | `phrases[]` (`{id, en, es, cat}` — `cat` drives the category filter and comes from `CATALOGUE`; a learner's own phrase gets `CUSTOM_CAT`), `notes[]` (`{id, title, body, open}`) | overlay, sidepanel |
 | `REPLY` | `answer[]` (one item; its key term wrapped in `**`), `ideas[]` (each `{en, es}`), or `pending`, or `error` | overlay, sidepanel |
+| `PAUSED` | `paused` | overlay, sidepanel |
 | `QUEUE` | `pending` | overlay, sidepanel |
 | `PARTIAL` | `text` (English, provisional) | overlay, sidepanel |
 | `LIVE_STATE` | `state` (`available`, `unsupported`, `unavailable`, `downloadable`, `downloading`, `error`, or `slow` — the preview lane retired because a pass cost more than it saved), `detail?`, `fallback?` (the Whisper preview lane is standing in, so there *is* live text, just not word by word) | overlay, sidepanel |
@@ -84,10 +89,22 @@ overlay / sidepanel / setup ──► background ──► offscreen ──► w
    overwrites it. It is not appended to `transcript`, never reaches the report, and is not cached
    in `lastUi` — a re-injected overlay must come back with no stale partial on screen. Every
    `SEGMENT` for `them` is followed by a `PARTIAL` with empty text that clears it.
-9. **`LIVE_STATE` is cached in `lastUi`**, unlike `PARTIAL`. It describes a condition that holds
+9. **Pause is not a stop.** `PAUSE` never writes a report, never releases a stream and never
+    clears the transcript — `STOP` does all three. Tearing the capture down would be
+    irreversible from the UI: invariant 1 grants tab audio only on a user invocation, and no
+    button inside the page or the panel is one. `PAUSED` is cached in `lastUi` alongside
+    `LIVE_STATE`, for the same reason.
+10. **`LIVE_STATE` is cached in `lastUi`**, unlike `PARTIAL`. It describes a condition that holds
    for the whole session, not a delta: an overlay injected after a page reload must come back
    knowing the word-by-word layer is off, or it silently promises text that is never coming.
-10. **`COACH_CHIPS` comes from `background`, not offscreen.** It is derived from `settings`, not
+11. **`RUNNING` identifies the session, it does not command a reset.** A view clears its
+    turns when `session` changes *and* `running` is true. Sending "clear now" instead would
+    break rule 4: the overlay is re-injected on every tab switch and reload, and a view that
+    first hears `RUNNING` at the end of a session would wipe the turns `UI_SYNC` just gave it.
+    The storage key `stoppedAt` decides on the offscreen side whether the previous transcript
+    is resumed or dropped, and `startedAt` holds the same session stamp for a view that missed
+    the broadcast — the side panel reads it from storage, the overlay gets it in `UI_SYNC`.
+12. **`COACH_CHIPS` comes from `background`, not offscreen.** It is derived from `settings`, not
     from the session, so it is broadcast on `START` and on any `storage.onChanged` touching
     `phraseIds`, `customPhrases`, `notes` or `liveCoach` — and it is *not* cleared when a session
     ends. `UI_SYNC` does not trigger a new broadcast; it replays the cached `lastUi.chips` in its

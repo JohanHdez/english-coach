@@ -15,7 +15,9 @@ const PREVIEW_SLOW_ROUNDS = 2;
 
 const state = {
   running: false,
+  paused: false,
   settings: null,
+  themStream: null,
   playbackCtx: null,
   workCtx: null,
   streams: [],
@@ -28,6 +30,7 @@ const state = {
   previewOff: false,
   seq: 0,
   turns: [],
+  session: 0,
   replyBusy: false,
   live: null,
   liveTrack: null,
@@ -331,7 +334,10 @@ async function attach(stream, speaker) {
     minSegMs: Number(state.settings?.minSegMs) || undefined,
     onPreview: speaker === 'them' ? queuePreview : null,
   });
-  node.port.onmessage = (e) => seg.push(e.data);
+  // Pausing drops the audio here rather than tearing the capture down. Chrome only
+  // grants tab audio on a user invocation (the action icon, a command, the context
+  // menu), so a Reanudar button in the page could never get the stream back.
+  node.port.onmessage = (e) => { if (!state.paused) seg.push(e.data); };
   src.connect(node);
   // Silent sink: keeps the graph alive without emitting sound.
   const mute = state.workCtx.createGain();
@@ -339,6 +345,8 @@ async function attach(stream, speaker) {
   node.connect(mute).connect(state.workCtx.destination);
   return seg;
 }
+
+const RESUME_WINDOW_MS = 3 * 60 * 1000;
 
 async function start(streamId, settings, streamKind) {
   if (state.running) return { ok: true };
@@ -349,8 +357,17 @@ async function start(streamId, settings, streamKind) {
   state.previewOff = false;
   state.segmenters = [];
   state.streams = [];
-  const { transcript = [] } = (await store.get('transcript')) || {};
-  state.turns = transcript;
+  // A stopped session is finished: its transcript must not become the opening of
+  // the next one, or the report analyses two conversations as if they were one.
+  // Only a restart inside the window resumes — stopping by accident, or pausing
+  // while someone walked into the room.
+  const { transcript = [], stoppedAt = 0 } = (await store.get(['transcript', 'stoppedAt'])) || {};
+  const resume = stoppedAt > 0 && Date.now() - stoppedAt <= RESUME_WINDOW_MS;
+  state.session = Date.now();
+  state.turns = resume ? transcript : [];
+  // Persisted, not only broadcast: the overlay is re-injected on every tab switch
+  // and reload, and asks for the session with UI_SYNC rather than a RUNNING it missed.
+  await store.set(resume ? { startedAt: state.session } : { startedAt: state.session, transcript: [] });
 
   state.workCtx = new AudioContext({ sampleRate: SR });
   await state.workCtx.audioWorklet.addModule(chrome.runtime.getURL('recorder-worklet.js'));
@@ -387,7 +404,7 @@ async function start(streamId, settings, streamKind) {
   if (themStream && settings.liveTranscript !== false) await startLiveLayer(themStream);
 
   const segmenters = [];
-  if (themStream) { state.streams.push(themStream); segmenters.push(await attach(themStream, 'them')); }
+  if (themStream) { state.streams.push(themStream); state.themStream = themStream; segmenters.push(await attach(themStream, 'them')); }
   if (micStream) { state.streams.push(micStream); segmenters.push(await attach(micStream, 'me')); }
   state.segmenters = segmenters;
 
@@ -409,7 +426,9 @@ async function start(streamId, settings, streamKind) {
   }
 
   state.running = true;
-  broadcast({ type: 'RUNNING', running: true });
+  state.paused = false;
+  broadcast({ type: 'RUNNING', running: true, session: state.session });
+  broadcast({ type: 'PAUSED', paused: false });
   return { ok: true };
 }
 
@@ -456,9 +475,36 @@ function stopLiveLayer() {
   broadcast({ type: 'PARTIAL', text: '' });
 }
 
+// Pause is not a small stop: the session, the streams and the invocation all stay
+// alive, and no report is written. Only the audio stops reaching the segmenters.
+async function pause() {
+  if (!state.running || state.paused) return { ok: true };
+  state.paused = true;
+  // Close the phrase in flight instead of letting it merge with whatever gets said
+  // after the resume, which would produce one turn spanning the gap.
+  for (const seg of state.segmenters || []) seg.flush();
+  stopLiveLayer();
+  broadcast({ type: 'PAUSED', paused: true });
+  status('En pausa. La sesión sigue abierta.', 'info');
+  return { ok: true };
+}
+
+async function resume() {
+  if (!state.running || !state.paused) return { ok: true };
+  state.paused = false;
+  broadcast({ type: 'PAUSED', paused: false });
+  status('');
+  // A fresh clone of the same live stream: stopLiveLayer stopped the previous one.
+  if (state.themStream) startLiveLayer(state.themStream).catch(() => {});
+  return { ok: true };
+}
+
 async function stop() {
   if (!state.running) return { ok: true };
   state.running = false;
+  state.paused = false;
+  state.themStream = null;
+  await store.set({ stoppedAt: Date.now() });
   // Provisional work is worthless once the session ended, and waitForQueue would
   // otherwise wait on it before the report.
   state.queue = state.queue.filter((s) => !s.preview);
@@ -468,7 +514,7 @@ async function stop() {
   state.streams = [];
   if (state.workCtx) { await state.workCtx.close().catch(() => {}); state.workCtx = null; }
   if (state.playbackCtx) { await state.playbackCtx.close().catch(() => {}); state.playbackCtx = null; }
-  broadcast({ type: 'RUNNING', running: false });
+  broadcast({ type: 'RUNNING', running: false, session: state.session });
   if (coachSettings().autoReport) {
     (async () => {
       await waitForQueue();
@@ -489,9 +535,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     try {
       if (msg.type === 'START') sendResponse(await start(msg.streamId, msg.settings, msg.streamKind));
       else if (msg.type === 'STOP') sendResponse(await stop());
+      else if (msg.type === 'PAUSE') sendResponse(await pause());
+      else if (msg.type === 'RESUME') sendResponse(await resume());
       else if (msg.type === 'SUGGEST_REPLY') sendResponse(await suggestReply());
       else if (msg.type === 'REPORT') sendResponse(await makeReport(false));
-      else if (msg.type === 'STATE') sendResponse({ running: state.running, pending: pendingCount() });
+      else if (msg.type === 'STATE') sendResponse({ running: state.running, paused: state.paused, pending: pendingCount() });
       else sendResponse({ ok: false, error: 'Mensaje desconocido' });
     } catch (e) {
       status('Error: ' + (e.message || e), 'error');

@@ -1,5 +1,6 @@
 import { DEFAULT_COACH, CONTEXT_MAX_CHARS } from './coach.js';
 import { toSpanish } from './translate.js';
+import { phraseCategories } from './phrasebook.js';
 import { installLive } from './live.js';
 import { resolveChips, toggleNoteOpen } from './phrasebook.js';
 
@@ -11,10 +12,12 @@ const els = {
   themSource: $('themSource'), themDevice: $('themDevice'), deviceField: $('deviceField'),
   captureMic: $('captureMic'), settings: $('settings'), sessionContext: $('sessionContext'),
   coach: $('coach'), askReply: $('askReply'),
-  phrases: $('phrases'), notes: $('notes'),
+  phrases: $('phrases'), notes: $('notes'), cats: $('cats'),
+  tabPhrases: $('tabPhrases'), tabNotes: $('tabNotes'),
+  phrasesPane: $('phrasesPane'), notesPane: $('notesPane'), clock: $('clock'),
   replyBox: $('replyBox'), replyStatus: $('replyStatus'),
   replyAnswer: $('replyAnswer'), replyIdeas: $('replyIdeas'),
-  report: $('report'), analyze: $('analyze'), download: $('download'), clear: $('clear'),
+  report: $('report'), pause: $('pause'), jump: $('jump'), sticky: $('sticky'), analyze: $('analyze'), download: $('download'), clear: $('clear'),
   openWindow: $('openWindow'),
   partial: $('partial'), partialEn: $('partialEn'), partialEs: $('partialEs'),
   liveNote: $('liveNote'), liveNoteText: $('liveNoteText'), liveNoteAction: $('liveNoteAction'),
@@ -22,6 +25,9 @@ const els = {
 
 let running = false;
 let entries = [];
+// See the overlay: RUNNING carries the session id, not a "clear now" flag, so
+// that a view which missed the start does not wipe itself when the session ends.
+let lastSession = 0;
 let settings = { ...DEFAULT_COACH };
 
 const PROMPT = `Eres un coach de inglés. Abajo está la transcripción de una conversación real.
@@ -42,34 +48,190 @@ const sorted = () => [...entries].sort((a, b) => a.t - b.t);
 // In a Spanish session the learner is the native speaker: nothing to translate.
 const traducir = () => settings.translate !== false && settings.lang !== 'es';
 
+// The DOM is capped, not rebuilt on every turn: rebuilding threw the scroll
+// position away, so reading back through the conversation was impossible while
+// the session ran. render() is the full repaint, for loading and clearing.
+let atBottom = true;
+let unread = 0;
+let stickyKey = null;
+let markEl = null;
+let markCount = 0;
+
+const nearBottom = (el) => el.scrollHeight - el.scrollTop - el.clientHeight < 48;
+
+function stickToBottom() {
+  if (!atBottom) return;
+  els.transcript.scrollTop = els.transcript.scrollHeight;
+}
+
+// The last thing the other person said, kept on screen while the learner reads
+// back. It only gives way when they speak again — and what it displaces is what
+// the counter counts, so the number always means "below here, and unreadable".
+const latestThem = () => sorted().reverse().find((e) => e.speaker !== 'me') || null;
+
+function renderSticky() {
+  const t = atBottom ? null : latestThem();
+  els.sticky.textContent = '';
+  els.sticky.hidden = !t;
+  stickyKey = t ? t.speaker + ':' + t.t : null;
+  if (!t) return;
+  const who = document.createElement('span');
+  who.className = 'who';
+  who.textContent = 'Interlocutor · lo último';
+  const p = document.createElement('div');
+  p.textContent = t.text;
+  els.sticky.append(who, p);
+  if (t.es) {
+    const es = document.createElement('span');
+    es.className = 'es';
+    es.textContent = t.es;
+    els.sticky.append(es);
+  }
+}
+
+function clearMark() {
+  markEl?.remove();
+  markEl = null;
+  markCount = 0;
+}
+
+// Half a millisecond before the turn it heads, so insertByTime keeps sorting the
+// list by dataset.t without having to know the divider exists.
+function placeMark(t) {
+  markEl = document.createElement('div');
+  markEl.className = 'unread-mark';
+  markEl.dataset.t = String(t - 0.5);
+  markEl.append(document.createElement('span'));
+  insertByTime(markEl, t - 0.5);
+}
+
+function paintMark() {
+  if (!markEl) return;
+  markEl.firstElementChild.textContent =
+    markCount === 1 ? '1 mensaje sin leer' : `${markCount} mensajes sin leer`;
+}
+
+function paintJump() {
+  els.jump.hidden = unread === 0;
+  els.jump.textContent = unread === 1 ? '1 mensaje nuevo ↓' : `${unread} mensajes nuevos ↓`;
+}
+
+function bubbleNode(e) {
+  const div = document.createElement('div');
+  div.className = 'bubble ' + (e.speaker === 'me' ? 'me' : 'them');
+  div.dataset.t = e.t;
+  div.dataset.key = e.speaker + ':' + e.t;
+  const meta = document.createElement('span');
+  meta.className = 'meta';
+  meta.textContent = `${e.speaker === 'me' ? 'Yo' : 'Interlocutor'} · ${fmtTime(e.t)}`;
+  const p = document.createElement('span');
+  p.textContent = e.text;
+  div.append(meta, p);
+  if (e.speaker !== 'me' && traducir()) {
+    const es = document.createElement('span');
+    es.className = 'es';
+    div.append(es);
+    // Cached on the entry, not the node: a fold replaces the node.
+    if (e.es) es.textContent = e.es;
+    else toSpanish(e.text).then((txt) => {
+      if (!txt) return;
+      e.es = txt;
+      es.textContent = txt;
+      // The translation lands after the bubble was painted and makes it taller.
+      // Without this the newest line sits half out of sight the moment it arrives.
+      stickToBottom();
+      // The sticky card is a copy of this turn: it needs the Spanish too.
+      if (stickyKey === e.speaker + ':' + e.t) renderSticky();
+    });
+  }
+  return div;
+}
+
 function render() {
+  // A full repaint detaches whatever the divider was pointing at.
+  clearMark();
   els.transcript.innerHTML = '';
   if (!entries.length) {
     els.transcript.innerHTML = '<p class="empty">Aquí aparecerá la conversación transcrita.</p>';
+    unread = 0;
+    paintJump();
+    renderSticky();
     return;
   }
-  for (const e of sorted()) {
-    const div = document.createElement('div');
-    div.className = 'bubble ' + (e.speaker === 'me' ? 'me' : 'them');
-    const meta = document.createElement('span');
-    meta.className = 'meta';
-    meta.textContent = `${e.speaker === 'me' ? 'Yo' : 'Interlocutor'} · ${fmtTime(e.t)}`;
-    const p = document.createElement('span');
-    p.textContent = e.text;
-    div.append(meta, p);
-    if (e.speaker !== 'me' && traducir()) {
-      const es = document.createElement('span');
-      es.className = 'es';
-      div.append(es);
-      // The translation is cached on the entry: render() rebuilds the DOM on every
-      // new turn, and the promise would resolve onto an already-detached node.
-      if (e.es) es.textContent = e.es;
-      else toSpanish(e.text).then((txt) => { if (txt) { e.es = txt; es.textContent = txt; } });
-    }
-    els.transcript.append(div);
-  }
+  for (const e of sorted()) els.transcript.append(bubbleNode(e));
   els.transcript.scrollTop = els.transcript.scrollHeight;
+  atBottom = true;
+  unread = 0;
+  paintJump();
+  renderSticky();
 }
+
+// Turns are folded and a 'them' segment can overtake the queue, so the newest is
+// not always the latest: walk back from the end instead of always appending.
+function insertByTime(node, t) {
+  let ref = null;
+  for (let el = els.transcript.lastElementChild; el; el = el.previousElementSibling) {
+    if (Number(el.dataset.t) <= t) break;
+    ref = el;
+  }
+  els.transcript.insertBefore(node, ref);
+}
+
+function addEntry(entry) {
+  const i = entries.findIndex((e) => e.t === entry.t && e.speaker === entry.speaker);
+  const isNew = i < 0;
+  if (isNew) entries.push(entry); else entries[i] = entry;
+
+  const empty = els.transcript.querySelector('.empty');
+  if (empty) empty.remove();
+
+  const node = bubbleNode(entry);
+  const old = els.transcript.querySelector(`[data-key="${entry.speaker}:${entry.t}"]`);
+  if (old) old.replaceWith(node);
+  else insertByTime(node, entry.t);
+
+  if (atBottom) {
+    // Watching it happen live: any bookmark left over from an earlier run points at
+    // something already read, so it goes rather than growing stale.
+    if (isNew) clearMark();
+    stickToBottom();
+  } else if (isNew) {
+    // Answering is what spends the bookmark, exactly as it does in a chat app.
+    if (entry.speaker === 'me') clearMark();
+    else {
+      if (!markEl) placeMark(entry.t);
+      markCount++;
+      paintMark();
+    }
+    // A new 'them' turn takes the card over, so what it displaces is what becomes
+    // unreadable. A turn that merely grew by folding displaces nothing.
+    if (entry.speaker === 'me' || stickyKey) unread++;
+    renderSticky();
+    paintJump();
+  } else if (stickyKey === entry.speaker + ':' + entry.t) renderSticky();
+}
+
+els.transcript.addEventListener('scroll', () => {
+  const was = atBottom;
+  atBottom = nearBottom(els.transcript);
+  if (atBottom !== was) { if (atBottom) { unread = 0; paintJump(); } renderSticky(); }
+});
+
+els.jump.addEventListener('click', () => {
+  unread = 0;
+  paintJump();
+  // To the divider, not to the foot: the useful place is where the unread run
+  // starts. Without one there is nothing to land on, so the foot it is.
+  if (markEl?.isConnected) {
+    const box = els.transcript;
+    const top = markEl.getBoundingClientRect().top - box.getBoundingClientRect().top + box.scrollTop;
+    box.scrollTop = Math.max(0, top - 8);
+    return;
+  }
+  atBottom = true;
+  renderSticky();
+  stickToBottom();
+});
 
 const toMarkdown = () => sorted()
   .map((e) => `**${e.speaker === 'me' ? 'Yo' : 'Interlocutor'}** (${fmtTime(e.t)}): ${e.text}`)
@@ -78,6 +240,11 @@ const toMarkdown = () => sorted()
 function setStatus(text, kind = 'info') {
   els.status.textContent = text;
   els.status.className = 'status ' + (kind === 'error' ? 'error' : kind === 'ok' ? 'ok' : '');
+}
+
+function setPaused(v) {
+  els.dot.classList.toggle('paused', v);
+  els.pause.textContent = v ? '▶ Reanudar' : '⏸ Pausar';
 }
 
 function setRunning(v) {
@@ -90,6 +257,8 @@ function setRunning(v) {
   els.themSource.disabled = v;
   els.themDevice.disabled = v;
   els.captureMic.disabled = v;
+  els.pause.hidden = !v;
+  if (!v) setPaused(false);
   syncCoach();
 }
 
@@ -100,9 +269,9 @@ function setRunning(v) {
 // exactly how the overlay gates it on .card.idle — so the panel, the floating
 // window and the page overlay agree about what is on screen when.
 function syncCoach() {
-  const lanes = els.phrases.childElementCount > 0 || els.notes.childElementCount > 0;
+  const lanes = coachData.phrases.length || coachData.notes.length;
   els.askReply.hidden = !running;
-  if (!running) els.replyBox.hidden = true;
+  if (!running) { els.replyBox.hidden = true; els.coach.classList.remove('replying'); }
   els.coach.hidden = !(lanes || running);
 }
 
@@ -111,17 +280,58 @@ function syncCoach() {
 // Phrases need no interaction: they are there to be glanced at mid-sentence.
 // Notes are collapsed but remember their state, so the learner opens "Mi daily"
 // before the meeting and never has to click while the other person waits.
-function showChips({ phrases = [], notes = [] }) {
+// Which tab is open and which category is filtered are view state only.
+let coachData = { phrases: [], notes: [] };
+let tab = 'phrases';
+let cat = null;
+
+function showChips({ phrases = [], notes = [] } = {}) {
+  coachData = { phrases, notes };
+  const cats = phraseCategories(phrases);
+  if (!cats.includes(cat)) cat = cats[0] || null;
+  renderCoach();
+}
+
+function renderCoach() {
+  const { phrases, notes } = coachData;
+  const cats = phraseCategories(phrases);
+
+  // A tab with nothing behind it is a dead end: hide it and, if it was the open
+  // one, fall through to the tab that does have something.
+  els.tabPhrases.hidden = !phrases.length;
+  els.tabNotes.hidden = !notes.length;
+  els.tabPhrases.querySelector('.count').textContent = phrases.length;
+  els.tabNotes.querySelector('.count').textContent = notes.length;
+  if (tab === 'phrases' && !phrases.length) tab = 'notes';
+  if (tab === 'notes' && !notes.length) tab = 'phrases';
+  els.tabPhrases.classList.toggle('on', tab === 'phrases');
+  els.tabNotes.classList.toggle('on', tab === 'notes');
+  els.phrasesPane.hidden = tab !== 'phrases';
+  els.notesPane.hidden = tab !== 'notes';
+
+  // One category is no choice, so the row only earns its space from two up.
+  els.cats.textContent = '';
+  if (cats.length > 1) {
+    for (const c of cats) {
+      const btn = document.createElement('button');
+      btn.className = 'cat' + (c === cat ? ' on' : '');
+      btn.type = 'button';
+      btn.textContent = c;
+      btn.addEventListener('click', () => { cat = c; renderCoach(); });
+      els.cats.append(btn);
+    }
+  }
+
   els.phrases.textContent = '';
-  for (const p of phrases) {
-    const chip = document.createElement('span');
+  for (const p of phrases.filter((x) => cats.length < 2 || x.cat === cat)) {
+    const chip = document.createElement('div');
     chip.className = 'chip';
     const en = document.createElement('b');
     en.textContent = p.en;
     chip.append(en);
     if (p.es) {
       const es = document.createElement('span');
-      es.textContent = ' · ' + p.es;
+      es.textContent = p.es;
       chip.append(es);
     }
     els.phrases.append(chip);
@@ -145,6 +355,9 @@ function showChips({ phrases = [], notes = [] }) {
   }
   syncCoach();
 }
+
+els.tabPhrases.addEventListener('click', () => { tab = 'phrases'; renderCoach(); });
+els.tabNotes.addEventListener('click', () => { tab = 'notes'; renderCoach(); });
 
 async function toggleNote(id) {
   const { settings: stored = {} } = await chrome.storage.local.get('settings');
@@ -277,10 +490,42 @@ function showReply({ answer = [], ideas = [], pending = false, error = '' } = {}
   fillGroup(els.replyAnswer, pending || error ? [] : answer, true);
   fillGroup(els.replyIdeas, pending || error ? [] : ideas);
   els.replyBox.hidden = false;
+  els.coach.classList.add('replying');
   // syncCoach has the last word: a reply that lands after the session ended must
   // not reopen the section, or the panel would show what the overlay hides.
   syncCoach();
 }
+
+// The dot says a session is live; the clock says how long. Between them the status
+// line is free for what only it can say — errors, the transcription queue.
+let clockTimer = null;
+const clockText = (ms) => {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  const mm = String(Math.floor(total / 60) % 60).padStart(2, '0');
+  const ss = String(total % 60).padStart(2, '0');
+  const hh = Math.floor(total / 3600);
+  return hh ? `${hh}:${mm}:${ss}` : `${mm}:${ss}`;
+};
+
+function startClock(startedAt) {
+  stopClock();
+  if (!startedAt) return;
+  const tick = () => { els.clock.textContent = clockText(Date.now() - startedAt); };
+  tick();
+  els.clock.hidden = false;
+  clockTimer = setInterval(tick, 1000);
+}
+
+function stopClock() {
+  if (clockTimer) clearInterval(clockTimer);
+  clockTimer = null;
+  els.clock.hidden = true;
+}
+
+els.pause.addEventListener('click', () => {
+  const type = els.dot.classList.contains('paused') ? 'RESUME' : 'PAUSE';
+  chrome.runtime.sendMessage({ type }).catch(() => {});
+});
 
 // The heavy lifting lives in the offscreen document: the panel only asks and paints.
 const suggestReply = () => chrome.runtime.sendMessage({ type: 'SUGGEST_REPLY' });
@@ -332,8 +577,8 @@ async function init() {
   if (els.openWindow) els.openWindow.hidden = isWindow;
   document.body.classList.toggle('as-window', isWindow);
 
-  const { settings: stored = {}, transcript = [], lastError } =
-    await chrome.storage.local.get(['settings', 'transcript', 'lastError']);
+  const { settings: stored = {}, transcript = [], lastError, startedAt = 0 } =
+    await chrome.storage.local.get(['settings', 'transcript', 'lastError', 'startedAt']);
   settings = { ...DEFAULT_COACH, ...stored };
   // First paint without waiting for a broadcast; COACH_CHIPS keeps it live afterwards.
   showChips(resolveChips(settings));
@@ -349,7 +594,9 @@ async function init() {
 
   const st = await chrome.runtime.sendMessage({ type: 'PING_STATE' }).catch(() => null);
   setRunning(!!(st && st.running));
-  if (st && st.running) setStatus('Grabando…', 'ok');
+  // A panel opened mid-session missed the RUNNING broadcast. It has chrome.storage
+  // of its own, so it reads the session start rather than growing the protocol.
+  if (st && st.running) { startClock(startedAt); setPaused(!!st.paused); setStatus(''); }
   // If the session failed while this view was closed, the error is still here.
   else if (lastError && Date.now() - lastError.at < 10 * 60 * 1000) setStatus(lastError.text, 'error');
   else if ((settings.themSource || 'tab') === 'tab') {
@@ -389,6 +636,7 @@ els.toggle.addEventListener('click', async () => {
     setRunning(true);
     setStatus('Grabando…', 'ok');
     els.replyBox.hidden = true;
+  els.coach.classList.remove('replying');
   } else {
     setStatus(res?.error || 'No se pudo iniciar.', 'error');
   }
@@ -420,28 +668,31 @@ els.clear.addEventListener('click', async () => {
   await chrome.storage.local.set({ transcript: [] });
   render();
   els.replyBox.hidden = true;
+  els.coach.classList.remove('replying');
   setStatus('Transcripción borrada.');
 });
 
 chrome.runtime.onMessage.addListener((msg) => {
   if (msg.target !== 'ui') return;
-  if (msg.type === 'SEGMENT') {
-    // A repeated (speaker, t) is a turn extended by folding: replace it, which
-    // also drops the cached translation so the whole merged text retranslates.
-    const i = entries.findIndex((e) => e.t === msg.entry.t && e.speaker === msg.entry.speaker);
-    if (i >= 0) entries[i] = msg.entry;
-    else entries.push(msg.entry);
-    render();
-  }
+  // A repeated (speaker, t) is a turn extended by folding: addEntry replaces it,
+  // which also drops the cached translation so the merged text retranslates whole.
+  if (msg.type === 'SEGMENT') addEntry(msg.entry);
   else if (msg.type === 'PARTIAL') showPartial(msg.text);
   else if (msg.type === 'LIVE_STATE') {
     if (msg.state !== 'available') showPartial('');
     showLiveNote(msg);
   }
+  else if (msg.type === 'PAUSED') setPaused(msg.paused);
   else if (msg.type === 'COACH_CHIPS') showChips(msg);
   else if (msg.type === 'REPLY') showReply(msg);
   else if (msg.type === 'STATUS') setStatus(msg.text, msg.kind);
-  else if (msg.type === 'RUNNING') { setRunning(msg.running); if (!msg.running) showPartial(''); }
+  else if (msg.type === 'RUNNING') {
+    if (msg.running && msg.session && msg.session !== lastSession) { entries = []; render(); }
+    if (msg.session) lastSession = msg.session;
+    setRunning(msg.running);
+    if (msg.running) startClock(msg.session);
+    else { stopClock(); showPartial(''); }
+  }
   else if (msg.type === 'QUEUE' && msg.pending > 0) setStatus(`Transcribiendo… (${msg.pending} en cola)`);
 });
 

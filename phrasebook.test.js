@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   CATALOGUE, DEFAULT_PHRASE_IDS, resolvePhrases, resolveNotes, resolveChips,
   NOTE_TITLE_MAX, NOTE_BODY_MAX, MAX_NOTES, MAX_CUSTOM, toggleNoteOpen, pickEnglishVoice,
+  CUSTOM_CAT, phraseCategories,
 } from './phrasebook.js';
 
 const allItems = () => CATALOGUE.flatMap((c) => c.items);
@@ -132,7 +133,7 @@ test('toggleNoteOpen flips the targeted note and returns a new settings object',
   assert.equal(toggleNoteOpen(out, 'n.1').notes[0].open, false);
 });
 
-test('toggleNoteOpen leaves the other notes untouched', () => {
+test('toggleNoteOpen keeps every note but opens only the one asked for', () => {
   const settings = {
     notes: [
       { id: 'n.1', title: 'a', body: 'x', open: true },
@@ -141,7 +142,8 @@ test('toggleNoteOpen leaves the other notes untouched', () => {
     ],
   };
   const out = toggleNoteOpen(settings, 'n.2');
-  assert.deepEqual(out.notes.map((n) => n.open), [true, true, true]);
+  assert.deepEqual(out.notes.map((n) => n.open), [false, true, false]);
+  assert.deepEqual(out.notes.map((n) => n.body), ['x', 'y', 'z']);
   assert.deepEqual(out.notes.map((n) => n.title), ['a', 'b', 'c']);
 });
 
@@ -196,4 +198,37 @@ test('pickEnglishVoice survives an empty or malformed voice list', () => {
 
 test('pickEnglishVoice is not fooled by a language that merely starts with en', () => {
   assert.equal(pickEnglishVoice([voice('Enya', 'eng-X'), voice('Mónica', 'es-ES')]), null);
+});
+
+test('every resolved phrase carries the category it was catalogued under', () => {
+  const out = resolvePhrases({ phraseIds: ['time.second', 'clarify.repeat'] });
+  assert.deepEqual(out.map((p) => p.cat), ['Ganar tiempo', 'Pedir aclaración']);
+});
+
+test('a custom phrase lands in its own category instead of having none', () => {
+  const out = resolvePhrases({ phraseIds: [], customPhrases: [{ id: 'u.1', en: 'Ship it,', es: 'a producción' }] });
+  assert.deepEqual(out.map((p) => p.cat), [CUSTOM_CAT]);
+});
+
+test('phraseCategories keeps phrase order and never repeats a category', () => {
+  const cats = phraseCategories(resolvePhrases({
+    phraseIds: ['time.second', 'clarify.repeat', 'time.think'],
+    customPhrases: [{ id: 'u.1', en: 'Ship it,', es: 'a producción' }],
+  }));
+  assert.deepEqual(cats, ['Ganar tiempo', 'Pedir aclaración', CUSTOM_CAT]);
+});
+
+test('phraseCategories on nothing returns nothing rather than one empty category', () => {
+  assert.deepEqual(phraseCategories([]), []);
+  assert.deepEqual(phraseCategories(), []);
+});
+
+test('opening a note closes whichever one was open', () => {
+  const settings = { notes: [{ id: 'a', title: 'a', open: true }, { id: 'b', title: 'b' }] };
+  assert.deepEqual(toggleNoteOpen(settings, 'b').notes.map((n) => n.open), [false, true]);
+});
+
+test('toggling the open note closes it and leaves the rest closed', () => {
+  const settings = { notes: [{ id: 'a', title: 'a', open: true }, { id: 'b', title: 'b' }] };
+  assert.deepEqual(toggleNoteOpen(settings, 'a').notes.map((n) => n.open), [false, false]);
 });

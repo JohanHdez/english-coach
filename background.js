@@ -10,7 +10,7 @@ const OFFSCREEN_URL = 'offscreen.html';
 let sessionTabId = null;
 let running = false;
 let coachWindowId = null;
-const lastUi = { chips: null, reply: null, status: null, live: null };
+const lastUi = { chips: null, reply: null, status: null, live: null, paused: null };
 
 // When a tab is shared, Chrome can leave the user in a window with no side panel
 // and no extension bar: a system notification is the only thing they are
@@ -190,6 +190,12 @@ async function stage(name, fn) {
   }
 }
 
+// The overlay asks about itself, so the host it is asking about is the sender's.
+function hostOf(sender) {
+  try { return new URL(sender?.tab?.url || '').hostname.toLowerCase(); }
+  catch { return ''; }
+}
+
 // Forwards whatever the offscreen document broadcasts into the session tab, so
 // the overlay hears it even with the side panel closed.
 function relayToTab(msg) {
@@ -221,6 +227,7 @@ async function attachOverlay(tabId) {
   try {
     await chrome.tabs.sendMessage(tabId, { target: 'ui', type: 'RUNNING', running: true });
     if (lastUi.live) await chrome.tabs.sendMessage(tabId, lastUi.live);
+    if (lastUi.paused) await chrome.tabs.sendMessage(tabId, lastUi.paused);
     if (lastUi.chips) await chrome.tabs.sendMessage(tabId, lastUi.chips);
     if (lastUi.reply) await chrome.tabs.sendMessage(tabId, lastUi.reply);
   } catch { /* la pestaña no admite overlay */ }
@@ -287,6 +294,7 @@ async function startCapture(settings, invocation = {}) {
   // cache already holds this session's value and wiping it would lose the notice.
   lastUi.reply = null;
   lastUi.live = null;
+  lastUi.paused = null;
 
   if (settings.themSource === 'tab') {
     if (/^(chrome|edge|about|chrome-extension|devtools):/.test(tab.url || '')) {
@@ -353,6 +361,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     // reload must come back knowing the live layer is off, or it silently
     // promises word-by-word text that is never coming.
     if (msg.type === 'LIVE_STATE') lastUi.live = msg;
+    // Same reason LIVE_STATE is cached: it describes a condition that holds for the
+    // session, so a view injected after a reload must come back knowing about it.
+    if (msg.type === 'PAUSED') lastUi.paused = msg;
     relayToTab(msg);
     return;
   }
@@ -394,6 +405,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           sendResponse({ ok: true });
           break;
         }
+        case 'PAUSE':
+        case 'RESUME':
         case 'SUGGEST_REPLY':
         case 'REPORT': {
           sendResponse(await forwardToOffscreen(msg.type));
@@ -402,10 +415,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         // The offscreen document has no chrome.storage: we serve it from here.
         // A freshly injected overlay asks for state so it can paint itself fully.
         case 'UI_SYNC': {
-          const { transcript = [] } = await chrome.storage.local.get('transcript');
+          const { transcript = [], startedAt = 0 } = await chrome.storage.local.get(['transcript', 'startedAt']);
           const { settings = {} } = await chrome.storage.local.get('settings');
           sendResponse({
             running,
+            startedAt,
             turns: transcript.slice(-12),
             // lastUi is module state and is gone after a worker suspension, but the
             // chips derive from settings, which is already in hand: rebuild rather
@@ -414,8 +428,27 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             reply: lastUi.reply,
             status: lastUi.status,
             live: lastUi.live,
+            paused: lastUi.paused,
             translate: settings.translate !== false && settings.lang !== 'es',
+            pillPos: settings.pillPos || null,
+            pillHidden: (settings.pillHiddenHosts || []).includes(hostOf(sender)),
           });
+          break;
+        }
+        // The overlay has no chrome.storage: it parks the pill and mutes a site here.
+        case 'PILL_POS': {
+          const { settings = {} } = await chrome.storage.local.get('settings');
+          await chrome.storage.local.set({ settings: { ...settings, pillPos: msg.pos } });
+          sendResponse({ ok: true });
+          break;
+        }
+        case 'PILL_HIDE': {
+          const { settings = {} } = await chrome.storage.local.get('settings');
+          const host = String(msg.host || '').toLowerCase();
+          const hosts = new Set(settings.pillHiddenHosts || []);
+          if (host) hosts.add(host);
+          await chrome.storage.local.set({ settings: { ...settings, pillHiddenHosts: [...hosts] } });
+          sendResponse({ ok: true });
           break;
         }
         case 'STORE_GET': {

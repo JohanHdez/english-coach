@@ -51,6 +51,9 @@ h1 { font-size: 14px; margin: 0; font-weight: 600; }
   background: var(--muted); flex: none;
 }
 .dot.on { background: #e03131; animation: pulse 1.4s infinite; }
+.dot.paused { background: #d9a441; animation: none; }
+.clock { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.clock[hidden] { display: none; }
 @keyframes pulse { 50% { opacity: .35; } }
 
 .icon {
@@ -97,46 +100,124 @@ button.danger { color: var(--danger); }
   color: var(--accent, #2f6fed); text-decoration: underline; cursor: pointer;
 }
 
-/* Bounded on purpose. The coach sits above the conversation, and .transcript is a
-   scroll container, so its automatic minimum is 0: an unbounded lane — 38 ticked
-   phrases, or a 2000-character note — would squeeze the conversation to nothing
-   and then push the footer past the viewport. Each lane scrolls inside its own
-   cap instead, and the whole region has one of its own as a backstop. */
+/* The coach is a ceiling, not a floor: half the panel at most, and less when the
+   phrases fit in less. And only one pane is mounted at a time, so phrases and notes
+   no longer both take room the way the two pinned lanes did. The reply takes this
+   same panel over rather than opening a third band underneath it. */
 .coach {
-  padding: 9px 12px; border-bottom: 1px solid var(--border);
+  padding: 0 12px 9px; border-bottom: 1px solid var(--border);
   background: color-mix(in srgb, var(--accent) 7%, var(--bg));
-  max-height: 45vh; overflow-y: auto;
+  max-height: 50%; min-height: 0; display: flex; flex-direction: column; overflow: hidden;
 }
-.coach-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
-.coach-title { font-size: 10.5px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 600; }
+.coach[hidden] { display: none; }
+
+.tabs {
+  display: flex; gap: 16px; align-items: center; flex: none;
+  margin: 0 -12px 9px; padding: 0 12px; border-bottom: 1px solid var(--border);
+}
+.tab {
+  background: none; border: 0; border-bottom: 2px solid transparent; margin-bottom: -1px;
+  color: var(--muted); font: inherit; font-size: 12.5px; padding: 8px 0 9px; cursor: pointer;
+  display: flex; gap: 6px; align-items: center;
+}
+.tab.on { color: var(--text); font-weight: 600; border-bottom-color: var(--accent); }
+.tab[hidden] { display: none; }
+.count {
+  font-size: 10.5px; color: var(--muted); background: var(--bg); border: 1px solid var(--border);
+  border-radius: 999px; padding: 0 5px; font-weight: 400;
+}
+#askReply { margin-left: auto; }
 button.ghost { background: transparent; border-color: var(--border); }
 
+.pane { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.pane[hidden] { display: none; }
+
+.cats { display: flex; gap: 5px; flex: none; overflow-x: auto; padding-bottom: 9px; }
+.cats:empty { display: none; }
+.cat {
+  flex: none; background: var(--bg); border: 1px solid var(--border); color: var(--muted);
+  border-radius: 999px; padding: 3px 10px; font: inherit; font-size: 11.5px; cursor: pointer;
+}
+.cat.on { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+
+.chip-list, .note-list {
+  flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 6px;
+}
 .chip {
-  background: var(--bg); border: 1px solid var(--border); border-radius: 999px;
-  padding: 3px 9px; font-size: 12px; cursor: default;
+  background: var(--bg); border: 1px solid var(--border); border-radius: 10px;
+  padding: 7px 10px; font-size: 13px; cursor: default;
 }
 .chip b { font-weight: 600; }
-.chip span { color: var(--muted); font-size: 11px; }
+.chip span { display: block; color: var(--muted); font-size: 11.5px; margin-top: 2px; }
 
-.phrases { display: flex; flex-wrap: wrap; gap: 6px; max-height: 18vh; overflow-y: auto; }
-.notes { margin-top: 8px; display: flex; flex-direction: column; gap: 4px; max-height: 22vh; overflow-y: auto; }
+.note { background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 8px 11px; }
 .note-head {
   width: 100%; text-align: left; background: none; border: 0; cursor: pointer;
-  color: inherit; font: inherit; padding: 3px 0;
+  color: inherit; font: inherit; font-size: 12.5px; padding: 0;
 }
-.note-body { margin: 2px 0 6px 14px; white-space: pre-wrap; font-size: 12px; }
-.notes:empty, .phrases:empty { display: none; }
+.note-body { margin: 6px 0 0; white-space: pre-wrap; font-size: 12px; line-height: 1.6; }
 
 .reply {
-  margin-top: 8px; padding: 8px 9px; border-radius: 8px;
+  flex: 1; min-height: 0; overflow-y: auto; padding: 8px 9px; border-radius: 10px;
   background: var(--bg); border: 1px solid var(--me-border);
 }
+.coach.replying .tabs .tab, .coach.replying .pane { display: none; }
 .reply p { margin: 0 0 6px; font-size: 13px; }
 
 /* min-height is the floor that makes the cap above a guarantee: a flex item with a
    0 basis contributes nothing to shrinking, so without it the conversation is the
    first thing laid out at zero height. */
-.transcript { flex: 1; min-height: 120px; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+.transcript-wrap { position: relative; flex: 1; min-height: 120px; display: flex; }
+.transcript { flex: 1; min-height: 0; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+
+/* Scrolling up is reading, not a mistake to correct: the conversation stays put
+   and this says how much arrived meanwhile. */
+.jump {
+  pointer-events: auto; z-index: 2;
+  background: var(--accent); color: #fff; border: none; border-radius: 999px;
+  padding: 6px 13px; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer;
+  box-shadow: 0 4px 14px rgba(0,0,0,.28);
+}
+.jump[hidden] { display: none; }
+
+/* Stacked over the foot of the conversation: the counter on top, and under it the
+   last thing the other person said, so a question stays readable while the learner
+   scrolls back for something else. */
+.overlays {
+  position: absolute; left: 12px; right: 12px; bottom: 0; padding-bottom: 10px;
+  display: flex; flex-direction: column; align-items: center; gap: 8px;
+  pointer-events: none;
+}
+.sticky {
+  pointer-events: auto; align-self: stretch; max-height: 46%; overflow-y: auto;
+  font-size: 12.5px; padding: 8px 10px; border-radius: 10px;
+  background: var(--them); border: 1px solid var(--muted);
+  box-shadow: 0 6px 20px rgba(0,0,0,.28);
+}
+.sticky[hidden] { display: none; }
+
+/* Where the learner left off. Placed at the head of the unread run and spent the
+   moment they answer — a bookmark, not a second counter. */
+.unread-mark { display: flex; align-items: center; gap: 8px; margin: 2px 0; }
+.unread-mark::before, .unread-mark::after {
+  content: ''; flex: 1; height: 1px; background: color-mix(in srgb, var(--accent) 45%, transparent);
+}
+.unread-mark span {
+  font-size: 10px; color: var(--accent); letter-spacing: .05em; text-transform: uppercase;
+  white-space: nowrap;
+}
+.sticky .who { display: block; font-size: 10px; color: #d9a441; margin-bottom: 2px; letter-spacing: .02em; }
+.sticky .es { display: block; color: var(--muted); font-size: 11px; font-style: italic; margin-top: 3px; }
+
+/* The default bar paints a pale slab down the panel. Thumb only, in the accent. */
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--accent) 55%, transparent); border-radius: 999px;
+  border: 3px solid transparent; background-clip: padding-box;
+}
+*::-webkit-scrollbar-thumb:hover { background: var(--accent); background-clip: padding-box; }
+*::-webkit-scrollbar-corner { background: transparent; }
 .empty { color: var(--muted); font-size: 12px; text-align: center; margin-top: 24px; }
 
 .bubble {
