@@ -39,10 +39,11 @@ changed. README prose is Spanish.
 
 ```bash
 zip -r "english-coach-$(node -p "require('./manifest.json').version").zip" . \
-  -x '.*' -x '*/.*' -x '.claude/*' -x 'CLAUDE.md' -x '*.zip' -x '*.test.js'
+  -x '.*' -x '*/.*' -x '.claude/*' -x 'CLAUDE.md' -x '*.zip' -x '*.test.js' -x 'docs/*'
 ```
 
-`LICENSE` and `THIRD-PARTY-NOTICES.md` stay **inside** the archive. `vendor/` redistributes
+`docs/` is excluded: the specs and plans in there are working notes, and everything in the
+archive is read by a reviewer. `LICENSE` and `THIRD-PARTY-NOTICES.md` stay **inside** the archive. `vendor/` redistributes
 Apache-2.0 and MIT code whose licenses require their notices to travel with the binaries, so an
 archive without them is a licence breach, not a tidier zip.
 

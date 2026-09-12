@@ -19,7 +19,6 @@ const els = {
   replyAnswer: $('replyAnswer'), replyIdeas: $('replyIdeas'),
   report: $('report'), pause: $('pause'), jump: $('jump'), sticky: $('sticky'), analyze: $('analyze'), download: $('download'), clear: $('clear'),
   openWindow: $('openWindow'),
-  partial: $('partial'), partialEn: $('partialEn'), partialEs: $('partialEs'),
   liveNote: $('liveNote'), liveNoteText: $('liveNoteText'), liveNoteAction: $('liveNoteAction'),
 };
 
@@ -405,36 +404,49 @@ els.liveNoteAction.addEventListener('click', async () => {
     : 'No se pudo instalar el paquete de idioma.';
 });
 
-// Provisional text from the live layer. A debounce would reset on every interim
-// word and never fire while the speaker keeps talking, so this throttles: one
-// translation per second at most, always of the latest text, applied in order.
+// Provisional text, one line per voice. Only the other speaker's line translates —
+// the learner needs no Spanish for what they just said themselves. A debounce
+// would reset on every interim word and never fire while the speaker keeps
+// talking, so the translation throttles: one per second at most, always of the
+// latest text, applied in order.
+const partials = {
+  them: { box: $('partialThem'), en: $('partialThemEn'), tail: $('partialThemTail'), es: $('partialThemEs') },
+  me: { box: $('partialMe'), en: $('partialMeEn'), tail: $('partialMeTail'), es: null },
+};
 let partialTimer = null;
 let partialTrAt = 0;
 let partialTrSeq = 0;
 let partialTrShown = 0;
 const PARTIAL_TR_MS = 1000;
 
-function showPartial(text) {
-  if (!els.partial) return;
-  clearTimeout(partialTimer);
+function showPartial(speaker, text, committed = '') {
+  const p = partials[speaker] || partials.them;
+  if (p.es) clearTimeout(partialTimer);
   if (!text) {
-    // A late toSpanish resolution must not paint the previous phrase's Spanish
-    // under the next phrase's English: invalidate everything in flight.
-    partialTrShown = ++partialTrSeq;
-    els.partial.hidden = true;
-    els.partialEn.textContent = '';
-    els.partialEs.textContent = '';
+    if (p.es) {
+      // A late toSpanish resolution must not paint the previous phrase's Spanish
+      // under the next phrase's English: invalidate everything in flight.
+      partialTrShown = ++partialTrSeq;
+      p.es.textContent = '';
+    }
+    p.box.hidden = true;
+    p.en.textContent = '';
+    p.tail.textContent = '';
     return;
   }
-  els.partial.hidden = false;
-  els.partialEn.textContent = text;
-  if (!traducir()) return;
+  p.box.hidden = false;
+  // committed is always a prefix of text; verify it rather than trust it, so a
+  // malformed message degrades to the old behaviour instead of losing words.
+  const settled = committed && text.startsWith(committed) ? committed : '';
+  p.en.textContent = settled;
+  p.tail.textContent = text.slice(settled.length);
+  if (!p.es || !traducir()) return;
   const wait = Math.max(0, PARTIAL_TR_MS - (Date.now() - partialTrAt));
   partialTimer = setTimeout(() => {
     partialTrAt = Date.now();
     const id = ++partialTrSeq;
-    toSpanish(els.partialEn.textContent).then((txt) => {
-      if (txt && id > partialTrShown) { partialTrShown = id; els.partialEs.textContent = txt; }
+    toSpanish(text).then((txt) => {
+      if (txt && id > partialTrShown) { partialTrShown = id; p.es.textContent = txt; }
     });
   }, wait);
 }
@@ -677,9 +689,9 @@ chrome.runtime.onMessage.addListener((msg) => {
   // A repeated (speaker, t) is a turn extended by folding: addEntry replaces it,
   // which also drops the cached translation so the merged text retranslates whole.
   if (msg.type === 'SEGMENT') addEntry(msg.entry);
-  else if (msg.type === 'PARTIAL') showPartial(msg.text);
+  else if (msg.type === 'PARTIAL') showPartial(msg.speaker === 'me' ? 'me' : 'them', msg.text, msg.committed);
   else if (msg.type === 'LIVE_STATE') {
-    if (msg.state !== 'available') showPartial('');
+    if (msg.state !== 'available') showPartial('them', '');
     showLiveNote(msg);
   }
   else if (msg.type === 'PAUSED') setPaused(msg.paused);
@@ -691,7 +703,7 @@ chrome.runtime.onMessage.addListener((msg) => {
     if (msg.session) lastSession = msg.session;
     setRunning(msg.running);
     if (msg.running) startClock(msg.session);
-    else { stopClock(); showPartial(''); }
+    else { stopClock(); showPartial('them', ''); showPartial('me', ''); }
   }
   else if (msg.type === 'QUEUE' && msg.pending > 0) setStatus(`Transcribiendo… (${msg.pending} en cola)`);
 });

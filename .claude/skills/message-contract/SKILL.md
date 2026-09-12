@@ -58,8 +58,8 @@ overlay / sidepanel / setup ──► background ──► offscreen ──► w
 | `REPLY` | `answer[]` (one item; its key term wrapped in `**`), `ideas[]` (each `{en, es}`), or `pending`, or `error` | overlay, sidepanel |
 | `PAUSED` | `paused` | overlay, sidepanel |
 | `QUEUE` | `pending` | overlay, sidepanel |
-| `PARTIAL` | `text` (English, provisional) | overlay, sidepanel |
-| `LIVE_STATE` | `state` (`available`, `unsupported`, `unavailable`, `downloadable`, `downloading`, `error`, or `slow` — the preview lane retired because a pass cost more than it saved), `detail?`, `fallback?` (the Whisper preview lane is standing in, so there *is* live text, just not word by word) | overlay, sidepanel |
+| `PARTIAL` | `speaker` (`them` or `me` — each voice paints its own line; views treat a missing value as `them`), `text` (that speaker's whole provisional line, English), `committed` (its settled prefix — the rest may still be rewritten) | overlay, sidepanel |
+| `LIVE_STATE` | `state` (`available`, `unsupported`, `unavailable`, `downloadable`, `downloading`, `error` — including the word-by-word lane reporting itself available and then never emitting a word, which the offscreen document only concludes after Whisper has transcribed `LIVE_PROOF_MS` of real speech — or `slow`, the preview lane retiring because a pass cost more than it saved), `detail?`, `fallback?` (the Whisper preview lane is standing in, so there *is* live text, just not word by word) | overlay, sidepanel |
 
 **offscreen ↔ worker** — plain `postMessage`, lowercase types, not part of this protocol:
 `init`, `transcribe` out; `progress`, `ready`, `result`, `error` back, correlated by `id`.
@@ -84,27 +84,38 @@ overlay / sidepanel / setup ──► background ──► offscreen ──► w
    negotiation and no fallback; a half-renamed type is a feature that stops working with no error.
 7. **Never put an API key, a raw audio buffer, or a `Float32Array` in a message.** Keys stay in
    storage; audio is transferred to the worker via `postMessage` transfer lists, not broadcast.
-8. **`PARTIAL` is provisional and never persisted.** It carries either live Web Speech output or
+8. **`committed` is a promise, not a hint.** A word inside `committed` will never change again:
+   the preview lane's passes overlap, so `stitch.js` settles a word once two consecutive passes
+   agree on it or once the window has moved past its audio. Views render it as settled and the
+   rest as unstable. Splitting the payload changes nothing about rule 9 below — none of it is
+   persisted — and `committed` is always a prefix of `text`.
+9. **`PARTIAL` is provisional and never persisted.** It carries either live Web Speech output or
    a throwaway Whisper pass over the phrase still being spoken, and the authoritative segment
    overwrites it. It is not appended to `transcript`, never reaches the report, and is not cached
-   in `lastUi` — a re-injected overlay must come back with no stale partial on screen. Every
-   `SEGMENT` for `them` is followed by a `PARTIAL` with empty text that clears it.
-9. **Pause is not a stop.** `PAUSE` never writes a report, never releases a stream and never
+   in `lastUi` — a re-injected overlay must come back with no stale partial on screen. A
+   `SEGMENT` whose phrase closed at a real pause is followed by a `PARTIAL` with empty text for
+   its speaker; a mid-speech cut (soft or hard) leaves the line standing, because blanking text
+   under someone who is still talking is exactly the disappearing live line the lane exists to
+   prevent — the next piece's first preview replaces it instead. The one exception is the
+   word-by-word Web Speech lane: while it drives the `them` line, every delivered `them` turn
+   resets it, open or not, or the recognizer's accumulated results would re-append text already
+   in the bubble and keep growing for the rest of the monologue.
+10. **Pause is not a stop.** `PAUSE` never writes a report, never releases a stream and never
     clears the transcript — `STOP` does all three. Tearing the capture down would be
     irreversible from the UI: invariant 1 grants tab audio only on a user invocation, and no
     button inside the page or the panel is one. `PAUSED` is cached in `lastUi` alongside
     `LIVE_STATE`, for the same reason.
-10. **`LIVE_STATE` is cached in `lastUi`**, unlike `PARTIAL`. It describes a condition that holds
+11. **`LIVE_STATE` is cached in `lastUi`**, unlike `PARTIAL`. It describes a condition that holds
    for the whole session, not a delta: an overlay injected after a page reload must come back
    knowing the word-by-word layer is off, or it silently promises text that is never coming.
-11. **`RUNNING` identifies the session, it does not command a reset.** A view clears its
+12. **`RUNNING` identifies the session, it does not command a reset.** A view clears its
     turns when `session` changes *and* `running` is true. Sending "clear now" instead would
     break rule 4: the overlay is re-injected on every tab switch and reload, and a view that
     first hears `RUNNING` at the end of a session would wipe the turns `UI_SYNC` just gave it.
     The storage key `stoppedAt` decides on the offscreen side whether the previous transcript
     is resumed or dropped, and `startedAt` holds the same session stamp for a view that missed
     the broadcast — the side panel reads it from storage, the overlay gets it in `UI_SYNC`.
-12. **`COACH_CHIPS` comes from `background`, not offscreen.** It is derived from `settings`, not
+13. **`COACH_CHIPS` comes from `background`, not offscreen.** It is derived from `settings`, not
     from the session, so it is broadcast on `START` and on any `storage.onChanged` touching
     `phraseIds`, `customPhrases`, `notes` or `liveCoach` — and it is *not* cleared when a session
     ends. `UI_SYNC` does not trigger a new broadcast; it replays the cached `lastUi.chips` in its

@@ -2,8 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   Segmenter, isJunk, floatToWav, foldIntoTranscript,
-  CHUNK_MS, SILENCE_MS, MAX_SEG_MS, SOFT_CUT_MS, SOFT_SILENCE_MS, MIN_VOICED,
-  MERGE_GAP_MS, MERGE_MAX_CHARS, PREVIEW_EVERY_MS, PREVIEW_MIN_MS,
+  CHUNK_MS, SILENCE_MS, MAX_SEG_MS, SOFT_CUT_MS, SOFT_SILENCE_MS, MIN_VOICED, PREROLL,
+  MERGE_GAP_MS, MERGE_MAX_CHARS, PREVIEW_EVERY_MS, PREVIEW_MIN_MS, PREVIEW_TAIL_MS, SR,
 } from './segmenter.js';
 
 const VOICE = 0.5;
@@ -161,6 +161,35 @@ test('folding compares against the chronologically latest turn, not the last app
   assert.equal(tr.length, 3);
 });
 
+// A cut with the speaker still going (soft or hard) is not the end of the phrase:
+// the consumer needs to know the difference, because blanking the live line on a
+// mid-speech cut erases text from under someone who is still talking.
+test('mid-speech cuts are open, a real pause closes', () => {
+  const pattern = [];
+  for (let i = 0; i < 3; i++) pattern.push([VOICE, 45], [QUIET, 3]);
+  const stream = run(pattern);
+  assert.ok(stream.length >= 2, `expected a stream of pieces, got ${stream.length}`);
+  for (const s of stream) assert.equal(s.open, true, 'a soft cut leaves the phrase open');
+  const closed = run([[VOICE, 20], [QUIET, SILENCE_MS / CHUNK_MS + 1]]);
+  assert.equal(closed[0].open, false, 'the piece closed by silence ends the phrase');
+});
+
+test('the hard cut also leaves the phrase open', () => {
+  const segs = run([[VOICE, 200], [QUIET, 8]]);
+  assert.equal(segs[0].durationMs, MAX_SEG_MS);
+  assert.equal(segs[0].open, true);
+});
+
+test('an explicit flush closes the phrase', () => {
+  const out = [];
+  let t = 0;
+  const seg = new Segmenter('me', (s) => out.push(s), () => t);
+  for (let i = 0; i < 10; i++) { t += CHUNK_MS; seg.push(block(QUIET)); }
+  for (let i = 0; i < 20; i++) { t += CHUNK_MS; seg.push(block(VOICE)); }
+  seg.flush();
+  assert.equal(out[0].open, false, 'pause and stop flush mid-phrase, and that ends it');
+});
+
 // ------------------------------------------------------------------ previews
 
 // Like run(), but keeps the phrase open: the preview lane is about what the
@@ -183,7 +212,12 @@ function runWithPreview(pattern, opts = {}) {
 test('an open phrase previews itself while it is still growing', () => {
   const { segs, previews } = runWithPreview([[VOICE, 40]]);
   assert.equal(segs.length, 0, 'nothing has closed the phrase yet');
-  assert.deepEqual(previews.map((p) => p.durationMs), [1200, 2400, 3600]);
+  // The rule, not the constants: the first preview is due as soon as both floors
+  // are met — which is when the MIN_VOICED-th voiced block lands, in a buffer that
+  // also holds the lead-in — and the rest follow one interval apart.
+  const at = previews.map((p) => p.durationMs);
+  assert.equal(at[0], (MIN_VOICED + PREROLL - 1) * CHUNK_MS);
+  for (let i = 1; i < at.length; i++) assert.equal(at[i] - at[i - 1], PREVIEW_EVERY_MS);
 });
 
 test('a preview carries the audio captured so far, tagged with its speaker', () => {
@@ -193,6 +227,52 @@ test('a preview carries the audio captured so far, tagged with its speaker', () 
     assert.equal(p.speaker, 'them');
     assert.equal(p.audio.length, (p.durationMs / CHUNK_MS) * 1600);
   }
+});
+
+// Which floor actually gates the first preview of a piece — measured, because the
+// answer is not the constant it looks like. Lowering PREVIEW_MIN_MS on its own
+// moves nothing: MIN_VOICED voiced blocks have to accumulate first, and the buffer
+// they arrive in already carries PREROLL-1 blocks of lead-in on top of them, so the
+// duration floor is satisfied by the same block that satisfies the voiced floor.
+// Anyone trying to cut the wait has to move MIN_VOICED, and this test says so.
+function firstPreviewOf(previewMinMs) {
+  const previews = [];
+  let t = 0;
+  let onset = null;
+  const seg = new Segmenter('them', () => {}, () => t, {
+    onPreview: (p) => previews.push({ at: t, durationMs: p.durationMs }),
+    previewMinMs,
+  });
+  for (let i = 0; i < 10; i++) { t += CHUNK_MS; seg.push(block(QUIET)); }
+  for (let i = 0; i < 20; i++) {
+    t += CHUNK_MS;
+    seg.push(block(VOICE));
+    if (onset === null) onset = t;
+  }
+  return { sinceOnset: previews[0].at - onset, buffer: previews[0].durationMs };
+}
+
+test('the voiced-block floor gates the first preview, not PREVIEW_MIN_MS', () => {
+  const base = firstPreviewOf(PREVIEW_MIN_MS);
+  // The onset block is itself the first voiced one, so the wait is the remaining
+  // MIN_VOICED-1 blocks — 400ms, not the 700ms the buffer length suggests.
+  assert.equal(base.sinceOnset, (MIN_VOICED - 1) * CHUNK_MS);
+  assert.equal(base.buffer, (MIN_VOICED + PREROLL - 1) * CHUNK_MS);
+  for (const lower of [400, 300, 200]) {
+    assert.deepEqual(firstPreviewOf(lower), base,
+      `previewMinMs=${lower} moved the first preview; MIN_VOICED is supposed to bind`);
+  }
+});
+
+test('PREVIEW_MIN_MS still gates once it is above the voiced-block floor', () => {
+  // Injected above the floor: on the defaults the two coincide, so a test using
+  // them could not say which rule refused.
+  const opts = { previewMinMs: 900 };
+  assert.equal(runWithPreview([[VOICE, 6]], opts).previews.length, 0,
+    'past MIN_VOICED but under the duration floor');
+  const late = runWithPreview([[VOICE, 12]], opts).previews;
+  assert.ok(late.length > 0, 'the same speech, past the floor, previews');
+  assert.equal(late[0].durationMs, 900);
 });
 
 test('speech shorter than PREVIEW_MIN_MS is never previewed', () => {
@@ -245,4 +325,65 @@ test('each piece of a monologue previews on its own', () => {
 test('without an onPreview callback the segmenter behaves exactly as before', () => {
   const withOut = run([[VOICE, 40], [QUIET, 12]]);
   assert.equal(withOut.length, 1);
+});
+
+test('a preview never carries more than the tail window, however long the phrase', () => {
+  const previews = [];
+  let t = 0;
+  const seg = new Segmenter('them', () => {}, () => t, { onPreview: (p) => previews.push(p) });
+  for (let i = 0; i < 10; i++) { t += CHUNK_MS; seg.push(block(QUIET)); }
+  // 30 s of unbroken speech — a synthetic voice with no breath dips, which is the
+  // case that used to make every pass slower than the last until the lane retired.
+  for (let i = 0; i < 300; i++) { t += CHUNK_MS; seg.push(block(VOICE)); }
+
+  assert.ok(previews.some((p) => p.durationMs > PREVIEW_TAIL_MS), 'the phrase must outgrow the window');
+  const cap = (PREVIEW_TAIL_MS / 1000) * SR;
+  for (const p of previews) {
+    assert.ok(p.audio.length <= cap + 1600, `${p.audio.length} samples is past the ${cap} window`);
+  }
+});
+
+test('a preview carries the end of the phrase, not its beginning', () => {
+  const previews = [];
+  let t = 0;
+  const seg = new Segmenter('them', () => {}, () => t, {
+    onPreview: (p) => previews.push(p),
+    previewTailMs: 1000,
+  });
+  for (let i = 0; i < 10; i++) { t += CHUNK_MS; seg.push(block(QUIET)); }
+  // Each block is stamped with its own position, so the samples say where in the
+  // phrase they came from.
+  for (let i = 0; i < 60; i++) {
+    t += CHUNK_MS;
+    seg.push({ samples: new Float32Array(1600).fill(0.4 + i / 1000), rms: VOICE });
+  }
+
+  const last = previews[previews.length - 1];
+  assert.equal(last.audio.length, (1000 / CHUNK_MS) * 1600);
+  const head = new Float32Array([0.4])[0];
+  assert.notEqual(last.audio[0], head, 'the preview kept the head of the phrase instead of the tail');
+});
+
+// A preview the engine cannot take must not spend the phrase's slot: refusing used
+// to cost a full PREVIEW_EVERY_MS of blank line, and another for each refusal after
+// it. That is the stutter the learner sees just after every bubble — the engine is
+// busy transcribing the segment that produced it, and frees a moment later.
+test('a refused preview does not spend the slot and is re-offered at once', () => {
+  const previews = [];
+  let busy = true;
+  let t = 0;
+  const seg = new Segmenter('them', () => {}, () => t, {
+    onPreview: (p) => previews.push(p),
+    canPreview: () => !busy,
+  });
+  for (let i = 0; i < 10; i++) { t += CHUNK_MS; seg.push(block(QUIET)); }
+  // Past the point where the first preview was due, and refused there.
+  for (let i = 0; i < 12; i++) { t += CHUNK_MS; seg.push(block(VOICE)); }
+  assert.equal(previews.length, 0, 'a refused preview must not be delivered');
+
+  // The engine frees well inside PREVIEW_EVERY_MS of that refusal.
+  busy = false;
+  t += CHUNK_MS;
+  seg.push(block(VOICE));
+  assert.equal(previews.length, 1, 'the lane waited instead of resuming on the first free block');
 });

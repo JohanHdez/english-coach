@@ -236,8 +236,16 @@ footer .row button { flex: 1; }
 .partial {
   margin: 0 12px 8px; padding: 7px 10px; border-radius: 10px; max-width: 92%;
   background: var(--them); border: 1px dashed var(--border);
-  white-space: pre-wrap; word-break: break-word; opacity: .75;
+  /* No blanket opacity: the dashed border already says provisional, and dimming the
+     box on top of the unsettled tail left a fresh phrase barely readable. */
+  white-space: pre-wrap; word-break: break-word;
 }
+/* The learner's own line wears their bubble colours and sits to the right, so the
+   two voices read apart at a glance even while both are provisional. */
+.partial.me { background: var(--me); border-color: var(--me-border); margin-left: auto; }
+/* Settled text reads like the conversation; the tail is still a guess and says so,
+   so nothing appears to mutate behind whoever is reading. */
+.partial-tail { color: color-mix(in srgb, var(--text) 70%, var(--muted)); }
 .partial .es { display: block; color: var(--muted); font-size: 11px; font-style: italic; margin-top: 3px; }
 
 .reply-status { color: var(--muted); font-size: 12px; margin: 0; }

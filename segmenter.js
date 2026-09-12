@@ -14,7 +14,20 @@ export const SOFT_SILENCE_MS = 300;
 // is offered for a throwaway transcription, so the English shows up in about a
 // second instead of waiting for the phrase to close. Nothing here is stored.
 export const PREVIEW_EVERY_MS = 1200;
-export const PREVIEW_MIN_MS = 1200;
+// After every cut this is dead time: the new phrase shows nothing until it has
+// this much speech in it. Set to the floor MIN_VOICED already imposes
+// (MIN_VOICED * CHUNK_MS), which is what actually gates the first preview —
+// measured, see the test. A larger value here is a second, hidden floor that
+// buys nothing today and would silently swallow the gain the day MIN_VOICED is
+// lowered to cut the wait.
+export const PREVIEW_MIN_MS = 500;
+// Only the tail is provisional news. Sending the whole phrase meant every pass over
+// a monologue cost more than the last, until they crossed PREVIEW_MAX_MS twice and
+// the lane retired itself — so the longer somebody talked, the more certain the
+// learner was to lose the live line exactly when they needed it. The head is
+// already on screen from the previous pass, and the authoritative segment carries
+// the whole phrase anyway.
+export const PREVIEW_TAIL_MS = 8000;
 export const MIN_SEG_MS = 900;   // discards noise and lone filler sounds
 export const MIN_VOICED = 5;     // minimum voiced blocks (0.5 s of real speech)
 export const PREROLL = 3;        // preceding blocks kept as preroll
@@ -29,6 +42,8 @@ export class Segmenter {
     this.onPreview = opts.onPreview || null;
     this.previewEveryMs = opts.previewEveryMs ?? PREVIEW_EVERY_MS;
     this.previewMinMs = opts.previewMinMs ?? PREVIEW_MIN_MS;
+    this.previewTailMs = opts.previewTailMs ?? PREVIEW_TAIL_MS;
+    this.canPreview = opts.canPreview || null;
     this.lastPreviewAt = null;
     this.floor = null;
     this.pre = [];
@@ -90,10 +105,15 @@ export class Segmenter {
     if (durationMs < this.previewMinMs || this.voicedCount < this.minVoiced) return;
     const at = this.now();
     if (this.lastPreviewAt !== null && at - this.lastPreviewAt < this.previewEveryMs) return;
+    // Ask before doing the work, and do not spend the slot on an offer the engine
+    // cannot take. Stamping first meant a preview refused because the engine was
+    // busy — which it always is just after a cut — cost a full previewEveryMs of
+    // blank line, and then the next one too. That is the stutter.
+    if (this.canPreview && !this.canPreview()) return;
     this.lastPreviewAt = at;
     this.onPreview({
       speaker: this.speaker,
-      audio: concat(this.chunks),
+      audio: tail(this.chunks, Math.round((this.previewTailMs / 1000) * SR)),
       startedAt: this.startedAt,
       durationMs,
     });
@@ -128,8 +148,19 @@ export class Segmenter {
 
     if (durationMs < this.minSegMs || voiced < this.minVoiced) return;
 
-    this.onSegment({ speaker: this.speaker, audio: concat(chunks), startedAt, durationMs });
+    // `open`: the speaker had not paused — the cut was soft or forced, and more of
+    // the same phrase is on its way. The consumer must not treat it as an ending.
+    this.onSegment({ speaker: this.speaker, audio: concat(chunks), startedAt, durationMs, open: keepActive });
   }
+}
+
+// Whole blocks from the end until the window is covered, so the cost of a pass
+// stops growing with the length of the phrase.
+function tail(chunks, maxSamples) {
+  let total = 0;
+  let i = chunks.length;
+  while (i > 0 && total < maxSamples) total += chunks[--i].length;
+  return concat(i === 0 ? chunks : chunks.slice(i));
 }
 
 function concat(chunks) {

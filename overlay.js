@@ -267,8 +267,18 @@
     .turn.me { background: #1e3a5f; }
     .turn span { display: block; font-size: 10px; color: #9aa0a6; }
     .turn .es { display: block; color: #9aa0a6; font-size: 11px; font-style: italic; margin-top: 3px; }
+    /* No blanket opacity: the dashed border already says provisional, and dimming
+       the box on top of dimming the unsettled tail left a fresh phrase — which has
+       nothing settled yet — barely readable. */
     .partial { margin-top: 5px; font-size: 12px; padding: 5px 8px; border-radius: 8px;
-      background: #24272d; border: 1px dashed #3a3f47; opacity: .75; }
+      background: #24272d; border: 1px dashed #3a3f47; }
+    /* The learner's own line wears their bubble colour, so the two voices read
+       apart at a glance even while both are provisional. */
+    .partial.me { background: #1e3a5f; }
+    .partial .who { display: block; font-size: 10px; color: #9aa0a6; }
+    /* Settled text reads like the conversation; the tail is still a guess and says
+       so, so nothing appears to mutate behind whoever is reading. */
+    .partial-tail { color: #c3c7cd; }
     .partial .es { display: block; color: #9aa0a6; font-size: 11px; font-style: italic; margin-top: 3px; }
     .card.idle .partial { display: none; }
 
@@ -334,7 +344,8 @@
             <div class="sticky" hidden></div>
           </div>
         </div>
-        <div class="partial" hidden><span class="partial-en"></span><span class="es"></span></div>
+        <div class="partial them" hidden><span class="who">Interlocutor · hablando ahora</span><span class="partial-en"></span><span class="partial-tail"></span><span class="es"></span></div>
+        <div class="partial me" hidden><span class="who">Yo · hablando ahora</span><span class="partial-en"></span><span class="partial-tail"></span></div>
       </div>
       <div class="foot">
         <button class="start-btn">● Empezar a transcribir</button>
@@ -673,8 +684,10 @@
     el.hidden = !texto;
   }
 
-  // Interim results arrive word by word. A debounce would reset on every word and
-  // never fire while the speaker keeps talking — exactly when the translation is
+  // Provisional text, one line per voice; only the other speaker's translates —
+  // the learner needs no Spanish for what they just said themselves. Interim
+  // results arrive word by word. A debounce would reset on every word and never
+  // fire while the speaker keeps talking — exactly when the translation is
   // needed — so this throttles instead: at most one translation per second, always
   // of the latest text, applied in order so a slow response cannot overwrite a
   // newer one.
@@ -684,29 +697,37 @@
   let partialTrShown = 0;
   const PARTIAL_TR_MS = 1000;
 
-  function showPartial(text) {
-    const box = $('.partial');
-    const en = $('.partial-en');
-    const es = $('.partial .es');
-    clearTimeout(partialTimer);
+  function showPartial(speaker, text, committed = '') {
+    const box = $(speaker === 'me' ? '.partial.me' : '.partial.them');
+    const en = box.querySelector('.partial-en');
+    const tail = box.querySelector('.partial-tail');
+    const es = box.querySelector('.es');
+    if (es) clearTimeout(partialTimer);
     if (!text) {
-      // Invalidate any in-flight translation too: clearTimeout cannot cancel a
-      // promise, and a late resolution would paint the previous phrase's
-      // Spanish under the next phrase's English.
-      partialTrShown = ++partialTrSeq;
+      if (es) {
+        // Invalidate any in-flight translation too: clearTimeout cannot cancel a
+        // promise, and a late resolution would paint the previous phrase's
+        // Spanish under the next phrase's English.
+        partialTrShown = ++partialTrSeq;
+        es.textContent = '';
+      }
       box.hidden = true;
       en.textContent = '';
-      es.textContent = '';
+      tail.textContent = '';
       return;
     }
     box.hidden = false;
-    en.textContent = text;
-    if (!translateOn) return;
+    // committed is always a prefix of text; verify it rather than trust it, so a
+    // malformed message degrades to the old behaviour instead of losing words.
+    const settled = committed && text.startsWith(committed) ? committed : '';
+    en.textContent = settled;
+    tail.textContent = text.slice(settled.length);
+    if (!es || !translateOn) return;
     const wait = Math.max(0, PARTIAL_TR_MS - (Date.now() - partialTrAt));
     partialTimer = setTimeout(() => {
       partialTrAt = Date.now();
       const id = ++partialTrSeq;
-      toSpanish(en.textContent).then((txt) => {
+      toSpanish(text).then((txt) => {
         if (txt && id > partialTrShown) { partialTrShown = id; es.textContent = txt; }
       });
     }, wait);
@@ -1009,7 +1030,7 @@
         if (msg.session) lastSession = msg.session;
         setMode(msg.running ? 'running' : 'idle');
         if (msg.running) { show(true); setStatus(''); startClock(msg.session); }
-        else { showPartial(''); showLiveNote(null); stopClock(); setStatus('Sesión terminada. El informe se está generando.'); }
+        else { showPartial('them', ''); showPartial('me', ''); showLiveNote(null); stopClock(); setStatus('Sesión terminada. El informe se está generando.'); }
         break;
       case 'STATUS': if (msg.show) show(true); setStatus(msg.text, msg.kind); break;
       case 'SEGMENT': show(true); addTurn(msg.entry); break;
@@ -1017,8 +1038,8 @@
       case 'COACH_CHIPS': showChips(msg); break;
       case 'REPLY': show(true); showReply(msg); break;
       case 'QUEUE': if (msg.pending > 0) setStatus(`Transcribiendo… (${msg.pending})`); break;
-      case 'PARTIAL': if (msg.text) show(true); showPartial(msg.text); break;
-      case 'LIVE_STATE': if (msg.state !== 'available') showPartial(''); showLiveNote(msg); break;
+      case 'PARTIAL': if (msg.text) show(true); showPartial(msg.speaker === 'me' ? 'me' : 'them', msg.text, msg.committed); break;
+      case 'LIVE_STATE': if (msg.state !== 'available') showPartial('them', ''); showLiveNote(msg); break;
       default: break;
     }
   });

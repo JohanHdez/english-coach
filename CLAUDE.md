@@ -109,8 +109,9 @@ security control, not formatting.
 **Errors.** Prefix user-visible failures with the stage that produced them: `[offscreen]`,
 `[captura]`, `[tabs.query]`. Chrome's own messages ("Invalid state") identify nothing.
 
-**Pure logic stays pure.** `segmenter.js`, `capture.js`, `coach.js`, `phrasebook.js` and
-`report.js` import no `chrome.*` and take their side effects as injected parameters
+**Pure logic stays pure.** `segmenter.js`, `capture.js`, `coach.js`, `phrasebook.js`,
+`stitch.js`, `queue.js` and `report.js` import no `chrome.*` and take their side effects as
+injected parameters
 (`Segmenter(…, now)`, `openCaptureStream(…, gum)`). That is deliberate: they import and run
 unmodified in Node, which is the only way any of this is testable. Keep new logic on that side of
 the line.

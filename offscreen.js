@@ -5,6 +5,8 @@ import { Segmenter, floatToWav, isJunk, foldIntoTranscript, SR } from './segment
 import { openCaptureStream } from './capture.js';
 import { askReply, askReport, groqBaseOf, redact, resolveProvider, PROVIDERS, DEFAULT_COACH } from './coach.js';
 import { startLive, liveAvailability } from './live.js';
+import { EMPTY as STITCH_EMPTY, stitch } from './stitch.js';
+import { insertPreview, insertReal } from './queue.js';
 
 // A preview has to cost less than the interval that schedules it, or the lane
 // stops paying for itself: on the WASM fallback a single pass can take seconds,
@@ -12,6 +14,10 @@ import { startLive, liveAvailability } from './live.js';
 // lane retires for the rest of the session.
 const PREVIEW_MAX_MS = 1500;
 const PREVIEW_SLOW_ROUNDS = 2;
+// How much real speech Whisper has to transcribe before a silent word-by-word lane
+// counts as dead rather than slow to warm up. Retiring a working layer only costs
+// the learner word-by-word text; keeping a dead one costs them every live line.
+const LIVE_PROOF_MS = 6000;
 
 const state = {
   running: false,
@@ -26,14 +32,25 @@ const state = {
   queue: [],
   busy: false,
   busyPreview: false,
-  previewSlow: 0,
-  previewOff: false,
+  // Per lane. Slowness is really a property of the shared engine, not of a voice,
+  // so which lane draws the slow pass is partly luck — and one shared counter
+  // meant one voice's bad luck silenced the other's live line too, which is the
+  // one thing this feature may never do.
+  previewSlow: { them: 0, me: 0 },
+  previewOff: { them: false, me: false },
   seq: 0,
   turns: [],
   session: 0,
   replyBusy: false,
   live: null,
   liveTrack: null,
+  liveHeard: false,
+  liveSilentMs: 0,
+  stitch: { them: STITCH_EMPTY, me: STITCH_EMPTY },
+  // Which piece each speaker's stitched line belongs to, by its startedAt. The
+  // segmenter opens a new piece at every cut; its first preview must start from
+  // nothing or it inherits the previous piece's committed prefix.
+  pieceStart: { them: 0, me: 0 },
 };
 
 // ---------------------------------------------------------------- utilities
@@ -73,15 +90,16 @@ async function appendTranscript(entry) {
   state.turns = transcript;
   await store.set({ transcript });
   broadcast({ type: 'SEGMENT', entry: shown });
-  if (entry.speaker === 'them') clearPartial();
 }
 
-// Two provisional layers can feed the same line — Web Speech word by word, or a
-// throwaway Whisper pass over the phrase in progress — and the authoritative
-// segment retires whichever one was showing.
-function clearPartial() {
-  if (state.live) state.live.reset();
-  else broadcast({ type: 'PARTIAL', text: '' });
+// The phrase ended: blank that speaker's live line. Only then — on a mid-speech
+// cut the line stays standing until the next piece's preview replaces it, because
+// blanking text under someone who is still talking is exactly the disappearing
+// line this lane exists to prevent.
+function clearPartial(speaker) {
+  state.stitch[speaker] = STITCH_EMPTY;
+  if (speaker === 'them' && state.live) state.live.reset();
+  else broadcast({ type: 'PARTIAL', speaker, text: '', committed: '' });
 }
 
 // ---------------------------------------------------------------- coach
@@ -176,9 +194,18 @@ function localTranscribe(audio) {
     const onMsg = (e) => {
       const m = e.data;
       if (m.id !== id) return;
+      // Only a terminal message retires the listener. Dropping it before the type
+      // is known costs nothing today — the worker sends exactly one result or one
+      // error per id — but the day it also sends something non-terminal for this
+      // id (a streamed partial, a per-pass progress note), that message would
+      // deregister the listener and the real result would land on nobody: the
+      // promise never settles, `busy` never clears, and the whole queue stops for
+      // the rest of the session. A silent, total stall is too expensive to leave
+      // resting on a message shape nobody has any reason to preserve.
+      if (m.type !== 'result' && m.type !== 'error') return;
       worker.removeEventListener('message', onMsg);
       if (m.type === 'result') resolve(m.text);
-      else if (m.type === 'error') reject(new Error(m.message));
+      else reject(new Error(m.message));
     };
     worker.addEventListener('message', onMsg);
     worker.postMessage({ type: 'transcribe', id, audio }, [audio.buffer]);
@@ -205,27 +232,12 @@ async function apiTranscribe(audio) {
 
 // ---------------------------------------------------------------- serial queue
 
-// What the other speaker says is urgent for following the conversation; your own
-// turns can wait — but not forever. Soft cuts make a monologue produce a 'them'
-// segment every few seconds, so an unbounded priority would starve queued 'me'
-// turns for as long as the other person keeps talking. Each 'me' segment can be
-// overtaken at most MAX_BYPASS times; after that, new 'them' segments queue
-// behind it. Order within each voice is never disturbed.
-const MAX_BYPASS = 3;
-
+// Ordering lives in queue.js, where it is testable. The one rule that matters
+// here: the live line outranks the archive, so previews go ahead of queued real
+// segments — a turn landing in its bubble a beat later costs the learner nothing,
+// a live line that freezes while someone talks costs them the conversation.
 function enqueue(seg) {
-  if (seg.speaker === 'them') {
-    const i = state.queue.findIndex((s) => s.speaker === 'me' && (s.bypassed || 0) < MAX_BYPASS);
-    if (i === -1) state.queue.push(seg);
-    else {
-      for (let j = i; j < state.queue.length; j++) {
-        if (state.queue[j].speaker === 'me') state.queue[j].bypassed = (state.queue[j].bypassed || 0) + 1;
-      }
-      state.queue.splice(i, 0, seg);
-    }
-  } else {
-    state.queue.push(seg);
-  }
+  insertReal(state.queue, seg);
   broadcast({ type: 'QUEUE', pending: pendingCount() });
   drain();
 }
@@ -237,14 +249,14 @@ const pendingCount = () =>
 
 const queueIdle = () => !state.busy && state.queue.length === 0;
 
-// The provisional lane. It only covers the gap left when Chrome's on-device
-// speech recognition is unavailable: while that layer runs it is word by word
-// and strictly better, so the two never compete for the same line.
-function previewEligible() {
+// The provisional lane, per speaker. Web Speech, while it lives, covers the other
+// speaker's line word by word and strictly better — but it never hears the
+// microphone, so the learner's own lane stays on regardless.
+function previewEligible(speaker) {
   const s = state.settings || {};
   return state.running
-    && !state.previewOff
-    && !state.live
+    && !state.previewOff[speaker]
+    && !(speaker === 'them' && state.live)
     // Before the model is loaded a preview would block on the download and take
     // the real segments hostage behind it — and trip the slowness guard.
     && state.workerReady
@@ -255,13 +267,18 @@ function previewEligible() {
 }
 
 function queuePreview(seg) {
-  if (!previewEligible()) return;
-  // Dropped, never queued: nothing provisional may delay a real turn, so a
-  // preview runs only while the engine has nothing else to do.
-  if (state.busy || state.queue.length) return;
-  state.queue.push({ ...seg, preview: true });
+  if (!previewEligible(seg.speaker)) return;
+  insertPreview(state.queue, seg);
   drain();
 }
+
+// Whether any voice in this session still has a live line at all: Web Speech covers
+// 'them' while it runs, the preview lane covers either. The 'slow' notice speaks for
+// the session, so it may only fire once nothing is left — announcing that there is
+// no live transcription while the other voice still has one would read as a broken
+// extension to someone watching text appear.
+const anyLiveLaneLeft = () => (state.segmenters || [])
+  .some((s) => (s.speaker === 'them' && !!state.live) || previewEligible(s.speaker));
 
 // The report only analyses the learner's own turns, which are exactly the ones
 // the queue defers. Without waiting here, an automatic report would omit them.
@@ -290,23 +307,57 @@ async function drain() {
       : await localTranscribe(seg.audio);
     const clean = (text || '').trim();
     if (seg.preview) {
-      if (Date.now() - startedAt > PREVIEW_MAX_MS && ++state.previewSlow >= PREVIEW_SLOW_ROUNDS) {
-        state.previewOff = true;
-        broadcast({ type: 'LIVE_STATE', state: 'slow', fallback: false });
+      // Consecutive rounds, which is what the constant has always claimed. Counting
+      // cumulatively meant two slow passes twenty minutes apart retired the lane.
+      if (Date.now() - startedAt > PREVIEW_MAX_MS) {
+        if (++state.previewSlow[seg.speaker] >= PREVIEW_SLOW_ROUNDS) {
+          state.previewOff[seg.speaker] = true;
+          if (!anyLiveLaneLeft()) broadcast({ type: 'LIVE_STATE', state: 'slow', fallback: false });
+        }
+      } else {
+        state.previewSlow[seg.speaker] = 0;
       }
       // Provisional only: displayed, never stored, never given to the coach.
-      if (state.running && !isJunk(clean)) broadcast({ type: 'PARTIAL', text: clean });
+      // Successive passes are overlapping re-transcriptions of the same speech, not
+      // pieces to swap in. Stitched, the line grows and only its tail can change.
+      // Not while paused: a pass that was in flight when the pause landed would
+      // otherwise repaint the line pause() just blanked.
+      if (state.running && !state.paused && !isJunk(clean)) {
+        if (state.pieceStart[seg.speaker] !== seg.startedAt) {
+          // First preview of a new piece: start from nothing, or it inherits the
+          // previous piece's committed prefix.
+          state.stitch[seg.speaker] = STITCH_EMPTY;
+          state.pieceStart[seg.speaker] = seg.startedAt;
+        }
+        const out = stitch(state.stitch[seg.speaker], clean);
+        state.stitch[seg.speaker] = out.state;
+        broadcast({
+          type: 'PARTIAL',
+          speaker: seg.speaker,
+          text: `${out.committed} ${out.tail}`.trim(),
+          committed: out.committed,
+        });
+      }
     } else if (!isJunk(clean)) {
+      if (seg.speaker === 'them' && state.live && !state.liveHeard) {
+        state.liveSilentMs += seg.durationMs || 0;
+        if (state.liveSilentMs >= LIVE_PROOF_MS) retireSilentLiveLayer();
+      }
       await appendTranscript({
         speaker: seg.speaker,
         text: clean,
         t: seg.startedAt,
         dur: Math.round(seg.durationMs / 100) / 10,
       });
-    } else if (seg.speaker === 'them') {
-      // A discarded turn also clears the provisional line: otherwise it stays
-      // frozen on screen until the other speaker talks again.
-      clearPartial();
+      // An open cut means the speaker never paused: their line stays on screen and
+      // the next piece's preview replaces it. Web Speech is the exception — its
+      // accumulated results now live in the bubble, and without a reset the line
+      // would repeat them and keep growing for the rest of the monologue.
+      if (!seg.open || (seg.speaker === 'them' && state.live)) clearPartial(seg.speaker);
+    } else if (!seg.open) {
+      // A discarded closing turn also clears the provisional line: otherwise it
+      // stays frozen on screen until that speaker talks again.
+      clearPartial(seg.speaker);
     }
   } catch (e) {
     // A failed preview stays silent: the real segment reports the same problem
@@ -332,7 +383,12 @@ async function attach(stream, speaker) {
   });
   const seg = new Segmenter(speaker, enqueue, () => Date.now(), {
     minSegMs: Number(state.settings?.minSegMs) || undefined,
-    onPreview: speaker === 'them' ? queuePreview : null,
+    // Both voices get a live line: the learner watching their own words appear is
+    // the feedback loop this extension exists for, not a nicety.
+    onPreview: queuePreview,
+    // Consulted before the audio is copied, so a refusal costs nothing and does not
+    // spend the phrase's next preview slot.
+    canPreview: () => previewEligible(speaker),
   });
   // Pausing drops the audio here rather than tearing the capture down. Chrome only
   // grants tab audio on a user invocation (the action icon, a command, the context
@@ -353,8 +409,10 @@ async function start(streamId, settings, streamKind) {
   state.settings = settings;
   state.queue = [];
   state.seq = 0;
-  state.previewSlow = 0;
-  state.previewOff = false;
+  state.previewSlow = { them: 0, me: 0 };
+  state.previewOff = { them: false, me: false };
+  state.stitch = { them: STITCH_EMPTY, me: STITCH_EMPTY };
+  state.pieceStart = { them: 0, me: 0 };
   state.segmenters = [];
   state.streams = [];
   // A stopped session is finished: its transcript must not become the opening of
@@ -436,6 +494,8 @@ async function start(streamId, settings, streamKind) {
 // English; each interface translates it on its own, because Translator's
 // availability inside an offscreen document is undocumented.
 async function startLiveLayer(themStream) {
+  state.liveHeard = false;
+  state.liveSilentMs = 0;
   const lang = state.settings?.lang === 'es' ? 'es-ES' : 'en-US';
   const estado = await liveAvailability(lang);
   if (estado !== 'available' && estado !== 'unknown') {
@@ -450,9 +510,12 @@ async function startLiveLayer(themStream) {
   state.live = startLive({
     track,
     lang,
-    onText: (text) => broadcast({ type: 'PARTIAL', text }),
+    onText: (text) => {
+      if (text) state.liveHeard = true;
+      broadcast({ type: 'PARTIAL', speaker: 'them', text });
+    },
     onError: (code) => {
-      broadcast({ type: 'PARTIAL', text: '' });
+      broadcast({ type: 'PARTIAL', speaker: 'them', text: '' });
       broadcast({ type: 'LIVE_STATE', state: 'error', detail: String(code), fallback: previewFallback() });
       stopLiveLayer();
     },
@@ -460,6 +523,23 @@ async function startLiveLayer(themStream) {
   broadcast(state.live
     ? { type: 'LIVE_STATE', state: 'available' }
     : { type: 'LIVE_STATE', state: 'unavailable', fallback: previewFallback() });
+}
+
+// Web Speech can report itself available and then never emit a single word — the
+// open macOS bug does exactly that. Nothing downstream notices, because
+// previewEligible() reads a live object as proof the word-by-word lane works and
+// keeps the Whisper fallback disabled, so the learner gets no live text at all and
+// no warning either. Whisper having just transcribed real speech is the evidence
+// that settles it: somebody spoke, and the other lane produced nothing.
+function retireSilentLiveLayer() {
+  if (!state.live || state.liveHeard) return;
+  stopLiveLayer();
+  broadcast({
+    type: 'LIVE_STATE',
+    state: 'error',
+    detail: 'no devolvió texto',
+    fallback: previewFallback(),
+  });
 }
 
 // Whether losing Web Speech actually costs the learner the live line. It does not
@@ -472,7 +552,7 @@ function stopLiveLayer() {
   state.live = null;
   try { state.liveTrack?.stop(); } catch { /* ya estaba parada */ }
   state.liveTrack = null;
-  broadcast({ type: 'PARTIAL', text: '' });
+  broadcast({ type: 'PARTIAL', speaker: 'them', text: '' });
 }
 
 // Pause is not a small stop: the session, the streams and the invocation all stay
@@ -484,6 +564,13 @@ async function pause() {
   // after the resume, which would produce one turn spanning the gap.
   for (const seg of state.segmenters || []) seg.flush();
   stopLiveLayer();
+  // Provisional work must not outlive the pause: a queued preview would repaint
+  // the line this is about to blank. One already in flight is caught in drain.
+  state.queue = state.queue.filter((s) => !s.preview);
+  // A flushed stub too short to become a segment never reaches drain, so nothing
+  // downstream would blank a line it left frozen.
+  clearPartial('them');
+  clearPartial('me');
   broadcast({ type: 'PAUSED', paused: true });
   status('En pausa. La sesión sigue abierta.', 'info');
   return { ok: true };
