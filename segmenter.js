@@ -232,6 +232,10 @@ export function foldIntoTranscript(transcript, entry, gapMs = MERGE_GAP_MS, maxC
   for (const e of transcript) if (!last || e.t > last.t) last = e;
   const fits = last && last.speaker === entry.speaker
     && entry.t >= last.t
+    // One bubble carries one language, because it carries one translation. An entry
+    // with no lang predates the field and matches anything, so an old transcript
+    // folds exactly as it used to.
+    && (!last.lang || !entry.lang || last.lang === entry.lang)
     && entry.t - (last.t + last.dur * 1000) <= gapMs
     && last.text.length + entry.text.length < maxChars;
   if (!fits) {

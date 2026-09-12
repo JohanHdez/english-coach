@@ -150,6 +150,34 @@ test('a merged turn stops growing at the character cap', () => {
   assert.equal(tr.length, 2);
 });
 
+test('consecutive turns in different languages do not fold', () => {
+  // The tab track carries every remote participant, so English and Spanish
+  // alternate on one speaker. Folded, they would share a bubble and a single
+  // translation.
+  const tr = [{ speaker: 'them', text: 'We can ship on Friday.', t: 1000, dur: 2, lang: 'en' }];
+  foldIntoTranscript(tr, { speaker: 'them', text: 'Perdón, ¿el viernes?', t: 4000, dur: 1.5, lang: 'es' });
+  assert.equal(tr.length, 2);
+});
+
+test('consecutive turns in the same language still fold', () => {
+  const tr = [{ speaker: 'them', text: 'We can ship', t: 1000, dur: 2, lang: 'en' }];
+  const shown = foldIntoTranscript(tr, { speaker: 'them', text: 'on Friday.', t: 4000, dur: 1, lang: 'en' });
+  assert.equal(tr.length, 1);
+  assert.equal(tr[0].text, 'We can ship on Friday.');
+  assert.equal(shown, tr[0]);
+});
+
+test('a transcript written before languages existed folds exactly as it did', () => {
+  // Entries stored by an earlier version carry no lang at all.
+  const tr = [{ speaker: 'me', text: 'I think I need more', t: 1000, dur: 2 }];
+  foldIntoTranscript(tr, { speaker: 'me', text: 'fluency in English.', t: 4500, dur: 1.5 });
+  assert.equal(tr.length, 1);
+  // And a labelled entry folds into an unlabelled one rather than splitting the turn.
+  const mixto = [{ speaker: 'me', text: 'I think', t: 1000, dur: 2 }];
+  foldIntoTranscript(mixto, { speaker: 'me', text: 'so too.', t: 4000, dur: 1, lang: 'en' });
+  assert.equal(mixto.length, 1);
+});
+
 test('folding compares against the chronologically latest turn, not the last appended', () => {
   // The transcription queue lets 'them' overtake 'me', so an older 'me' segment
   // can be appended after a newer 'them' one.
