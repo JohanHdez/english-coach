@@ -134,6 +134,15 @@ async function callAnthropic({ key, model, system, user, maxTokens, base }) {
   return (data.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('\n');
 }
 
+// A thinking model spends its reasoning from the same ceiling before it writes any
+// of the answer — the note on JSON_BUDGET records this for Groq's gpt-oss models,
+// and Claude Opus 5 thinks by default, so every ceiling measured against a
+// non-thinking model is too low for it. Groq keeps its measured figures: its free
+// tier allows 8000 tokens a minute, so raising them there would trade a truncated
+// answer for a rate-limit error. A ceiling is not a target — nothing is spent on
+// headroom that goes unused.
+const THINKING_FLOOR = { anthropic: 16000 };
+
 // With only one key configured, the chosen provider may not be the one that has it.
 // Failing outright leaves the user with no report despite having the means to make one.
 export function resolveProvider(preferred, keys = {}) {
@@ -156,10 +165,11 @@ async function ask({ provider, model, keys, system, user, maxTokens = 700, schem
   // The requested model belongs to the original provider: switching means changing it.
   const usado = elegido.fallback ? PROVIDERS[elegido.provider].models[0] : model;
   const key = keys[PROVIDERS[elegido.provider].keyField];
+  const techo = Math.max(maxTokens, THINKING_FLOOR[elegido.provider] || 0);
   if (elegido.provider === 'groq') {
-    return callGroq({ key, model: usado, system, user, maxTokens, schema, base: groqBaseOf(keys) });
+    return callGroq({ key, model: usado, system, user, maxTokens: techo, schema, base: groqBaseOf(keys) });
   }
-  return callAnthropic({ key, model: usado, system, user, maxTokens, base: anthropicBaseOf(keys) });
+  return callAnthropic({ key, model: usado, system, user, maxTokens: techo, base: anthropicBaseOf(keys) });
 }
 
 // Extracts the first JSON object from a response, tolerating prose or ```json fences.

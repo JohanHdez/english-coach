@@ -82,6 +82,79 @@ function stubGroq(capture, content) {
   return () => { globalThis.fetch = original; };
 }
 
+// Stub for the Anthropic endpoint: captures the request body instead of hitting
+// the network. Shaped like the Messages API response, which nests text blocks
+// under `content` rather than Groq's `choices`.
+function stubAnthropic(capture, text) {
+  const original = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    capture.url = url;
+    capture.body = JSON.parse(init.body);
+    capture.headers = init.headers;
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({ content: [{ type: 'text', text }], stop_reason: 'end_turn' }),
+    };
+  };
+  return () => { globalThis.fetch = original; };
+}
+
+const CLAUDE_SETTINGS = {
+  reportProvider: 'anthropic',
+  reportModel: 'claude-opus-5',
+  anthropicKey: 'sk-ant-test-key-for-unit-tests',
+  level: 'B1-B2',
+  situation: 'conversación de trabajo en inglés',
+  lang: 'en',
+};
+
+const TURNS = [
+  { speaker: 'me', text: 'I think we should ship it.', t: 1000, dur: 2 },
+  { speaker: 'them', text: 'Why this week?', t: 4000, dur: 1 },
+];
+
+test('the Claude report is given room to think before it answers', async () => {
+  // A thinking model spends its reasoning from max_tokens before writing a token
+  // of the answer, so a ceiling measured on a non-thinking model truncates it.
+  const seen = {};
+  const restore = stubAnthropic(seen, '# Informe\n\nTodo bien.');
+  try {
+    await askReport({ turns: TURNS, settings: CLAUDE_SETTINGS });
+  } finally {
+    restore();
+  }
+  assert.ok(seen.body.max_tokens >= 16000,
+    `Claude got max_tokens ${seen.body.max_tokens}; a thinking model needs room for reasoning plus the answer`);
+});
+
+test('Groq keeps its measured ceiling, which its free tier can pay for', async () => {
+  // Raising Groq's would trade a truncation for a rate-limit failure: the free
+  // tier allows 8000 tokens a minute.
+  const seen = {};
+  const restore = stubGroq(seen, '# Informe\n\nTodo bien.');
+  try {
+    await askReport({ turns: TURNS, settings: { ...REPLY_SETTINGS, reportProvider: 'groq' } });
+  } finally {
+    restore();
+  }
+  assert.equal(seen.body.max_completion_tokens, 2800);
+});
+
+test('never send a sampling parameter to Claude', async () => {
+  // temperature / top_p / top_k are rejected with a 400 on Opus 5 and Sonnet 5.
+  const seen = {};
+  const restore = stubAnthropic(seen, 'ok');
+  try {
+    await askReport({ turns: TURNS, settings: CLAUDE_SETTINGS });
+  } finally {
+    restore();
+  }
+  assert.ok(!('temperature' in seen.body));
+  assert.ok(!('top_p' in seen.body));
+  assert.ok(!('top_k' in seen.body));
+});
+
 const REPLY_SETTINGS = {
   reportProvider: 'groq',
   reportModel: 'openai/gpt-oss-120b',
