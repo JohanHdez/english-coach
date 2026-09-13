@@ -252,6 +252,10 @@ const queueIdle = () => !state.busy && state.queue.length === 0;
 // The provisional lane, per speaker. Web Speech, while it lives, covers the other
 // speaker's line word by word and strictly better — but it never hears the
 // microphone, so the learner's own lane stays on regardless.
+// The lane is local whatever the engine: a preview is provisional audio, so sending
+// it to Groq would both leak speech still being spoken and exhaust the free tier's
+// request budget in minutes. Keeping it local is what lets the engine setting govern
+// authoritative turns alone.
 function previewEligible(speaker) {
   const s = state.settings || {};
   return state.running
@@ -260,10 +264,7 @@ function previewEligible(speaker) {
     // Before the model is loaded a preview would block on the download and take
     // the real segments hostage behind it — and trip the slowness guard.
     && state.workerReady
-    && s.liveTranscript !== false
-    // One Groq audio request per preview would exhaust the free tier in minutes.
-    // On that engine Web Speech stays the only live source.
-    && s.engine !== 'api';
+    && s.liveTranscript !== false;
 }
 
 function queuePreview(seg) {
@@ -294,15 +295,11 @@ async function waitForQueue(timeoutMs = 120000) {
 async function drain() {
   if (state.busy || state.queue.length === 0) return;
   const seg = state.queue.shift();
-  // Settings are re-read on every coach call, so the engine can flip to the API
-  // mid-session. A preview queued before that must never become a Groq request:
-  // the lane is local-only, and provisional audio has no business leaving.
-  if (seg.preview && state.settings.engine === 'api') return drain();
   state.busy = true;
   state.busyPreview = !!seg.preview;
   const startedAt = Date.now();
   try {
-    const text = state.settings.engine === 'api'
+    const text = (!seg.preview && state.settings.engine === 'api')
       ? await apiTranscribe(seg.audio)
       : await localTranscribe(seg.audio);
     const clean = (text || '').trim();
@@ -470,18 +467,19 @@ async function start(streamId, settings, streamKind) {
     for (const t of s.getTracks()) t.onended = () => stop();
   }
 
-  if (settings.engine !== 'api') {
-    status('Cargando modelo local…', 'loading');
-    ensureWorker().postMessage({
-      type: 'init',
-      model: settings.model || 'onnx-community/whisper-base.en',
-      device: settings.device || 'webgpu',
-      base: chrome.runtime.getURL('vendor/'),
-      lang: settings.lang || 'en',
-    });
-  } else {
-    status('Escuchando (Groq API)…', 'ok');
-  }
+  // The model is what draws the live line, so it loads on both engines now. On the
+  // API engine it costs one download the first time and buys a live line that the
+  // authoritative turns — which do go to Groq — cannot provide.
+  status(settings.engine === 'api'
+    ? 'Cargando modelo local para la línea en vivo…'
+    : 'Cargando modelo local…', 'loading');
+  ensureWorker().postMessage({
+    type: 'init',
+    model: settings.model || 'onnx-community/whisper-base.en',
+    device: settings.device || 'webgpu',
+    base: chrome.runtime.getURL('vendor/'),
+    lang: settings.lang || 'en',
+  });
 
   state.running = true;
   state.paused = false;
@@ -542,10 +540,11 @@ function retireSilentLiveLayer() {
   });
 }
 
-// Whether losing Web Speech actually costs the learner the live line. It does not
-// on the local engine: the preview lane still shows English, in ~1 s pieces
-// instead of word by word.
-const previewFallback = () => (state.settings || {}).engine !== 'api';
+// Whether losing Web Speech actually costs the learner the live line. It does not,
+// unless the preview lane itself is off or retired — the lane is local on every
+// engine now.
+const previewFallback = () =>
+  (state.settings || {}).liveTranscript !== false && !state.previewOff.them;
 
 function stopLiveLayer() {
   state.live?.stop();
