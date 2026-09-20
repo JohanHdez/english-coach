@@ -69,14 +69,10 @@ const state = {
   // nothing or it inherits the previous piece's committed prefix.
   pieceStart: { them: 0, me: 0 },
   // The language each speaker is currently being transcribed in. Whisper has to be
-  // told a language before it decodes, so this is what a preview is decoded with;
-  // an authoritative turn is what corrects it (Groq detects the language itself,
-  // and on the local engine langid.js decides whether a re-pass is warranted).
+  // told a language before it decodes, so this is what the next pass starts from;
+  // every pass then reports back what it actually heard (Groq detects the language
+  // itself, and the local engine reads Whisper's own language token).
   lang: { them: 'en', me: 'en' },
-  // Consecutive turns whose text disagreed with the language they were decoded in.
-  // One disagreement re-transcribes that turn; two in a row move the speaker, so a
-  // single bad pass cannot flip someone mid-conversation.
-  langVotes: { them: 0, me: 0 },
   // Which language the accumulated line was decoded in, so a switch discards it
   // rather than appending across two languages.
   stitchLang: { them: 'en', me: 'en' },
@@ -251,7 +247,7 @@ function ensureWorker() {
   return worker;
 }
 
-function localTranscribe(audio, lang) {
+function localTranscribe(audio, lang, detectLang = false) {
   return new Promise((resolve, reject) => {
     const id = ++state.seq;
     const worker = ensureWorker();
@@ -268,11 +264,11 @@ function localTranscribe(audio, lang) {
       // to leave resting on a message shape nobody has any reason to preserve.
       if (m.type !== 'result' && m.type !== 'error') return;
       worker.removeEventListener('message', onMsg);
-      if (m.type === 'result') resolve(m.text);
+      if (m.type === 'result') resolve({ text: m.text, lang: m.lang ?? null });
       else reject(new Error(m.message));
     };
     worker.addEventListener('message', onMsg);
-    worker.postMessage({ type: 'transcribe', id, audio, lang }, [audio.buffer]);
+    worker.postMessage({ type: 'transcribe', id, audio, lang, detect: detectLang }, [audio.buffer]);
   });
 }
 
@@ -385,15 +381,15 @@ function drain() {
 
 async function transcribe(seg, lane) {
   const startedAt = Date.now();
-  // The transcription path transfers this buffer to the worker, so a possible second
-  // pass needs its own copy taken before the first one leaves. Only real segments can
-  // be re-read, so a preview pays nothing for this.
-  const backup = seg.preview ? null : seg.audio.slice();
   try {
+    const multi = state.settings.lang === 'multi';
     const result = lane === 'api'
       ? await apiTranscribe(seg.audio)
-      : { text: await localTranscribe(seg.audio, state.lang[seg.speaker]), lang: null };
+      : await localTranscribe(seg.audio, state.lang[seg.speaker], multi);
     const clean = (result.text || '').trim();
+    // What the engine heard outranks the sticky value, for previews and turns alike:
+    // it is what the line is decoded in, and what the next pass starts from.
+    if (result.lang) state.lang[seg.speaker] = result.lang;
     if (seg.preview) {
       // Consecutive rounds, which is what the constant has always claimed. Counting
       // cumulatively meant two slow passes twenty minutes apart retired the lane.
@@ -437,36 +433,20 @@ async function transcribe(seg, lane) {
         state.liveSilentMs += seg.durationMs || 0;
         if (state.liveSilentMs >= LIVE_PROOF_MS) retireSilentLiveLayer();
       }
-      // What the engine detected outranks everything; on the local engine there is
-      // none, so the text decides.
-      let turnText = clean;
+      // No label from the engine (a Groq response without one): the text decides,
+      // but only in a bilingual session — a pinned session has no question to
+      // answer, and a one-word turn can score 1.0 for either language.
       let turnLang = result.lang;
-      if (!turnLang) {
+      if (!turnLang && multi) {
         const read = detect(clean);
-        const other = state.lang[seg.speaker] === 'es' ? 'en' : 'es';
-        if (read.lang === other && read.confidence >= LANG_CONFIDENCE) {
-          state.langVotes[seg.speaker]++;
-          // One pass, never a loop: if the re-read still disagrees, the first text
-          // stands. Losing a turn is worse than labelling one wrongly.
-          try {
-            const second = ((await localTranscribe(backup, other)) || '').trim();
-            if (second && !isJunk(second)) { turnText = second; turnLang = other; }
-          } catch {
-            // A failed re-read must not cost the turn: the first pass still stands.
-          }
-          // Two agreements in a row, and the speaker moves.
-          if (state.langVotes[seg.speaker] >= 2) state.lang[seg.speaker] = other;
-        } else {
-          state.langVotes[seg.speaker] = 0;
-          if (read.lang && read.confidence >= LANG_CONFIDENCE) turnLang = read.lang;
+        if (read.lang && read.confidence >= LANG_CONFIDENCE) {
+          turnLang = read.lang;
+          state.lang[seg.speaker] = turnLang;
         }
-      } else {
-        state.langVotes[seg.speaker] = 0;
-        state.lang[seg.speaker] = turnLang;
       }
       await appendTranscript({
         speaker: seg.speaker,
-        text: turnText,
+        text: clean,
         t: seg.startedAt,
         dur: Math.round(seg.durationMs / 100) / 10,
         lang: turnLang || state.lang[seg.speaker],
@@ -541,7 +521,6 @@ async function start(streamId, settings, streamKind) {
   state.pieceStart = { them: 0, me: 0 };
   const sessionLang = settings.lang === 'es' ? 'es' : 'en';
   state.lang = { them: sessionLang, me: sessionLang };
-  state.langVotes = { them: 0, me: 0 };
   state.stitchLang = { them: sessionLang, me: sessionLang };
   state.segmenters = [];
   state.streams = [];

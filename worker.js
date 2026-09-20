@@ -21,6 +21,17 @@ export function modelForLang(model, lang) {
   return (lang == null || lang === 'en') ? model : String(model).replace(/\.en$/, '');
 }
 
+// The language token Whisper emits first, read back through the model's own table.
+// Only the two languages in scope count: any other token is "no evidence", so the
+// caller keeps the language it had rather than adopting one the product cannot show.
+export function langFromToken(lang_to_id, tokenId) {
+  if (!lang_to_id) return null;
+  for (const [token, id] of Object.entries(lang_to_id)) {
+    if (id === tokenId) return token === '<|en|>' ? 'en' : token === '<|es|>' ? 'es' : null;
+  }
+  return null;
+}
+
 function configure(base) {
   env.allowLocalModels = false;
   env.useBrowserCache = true;
@@ -102,6 +113,51 @@ function init(model, device, base, lang = 'en') {
   return ready;
 }
 
+const WHISPER_NAME = { en: 'english', es: 'spanish' };
+
+// Whether the loaded export has a language to name at all: the .en models carry no
+// language table, and asking them for one throws inside generate().
+const canDetect = () => !!transcriber?.model?.generation_config?.is_multilingual;
+
+// One encoder pass, two decoder runs: the first emits the language token (Whisper's
+// native detection, which the pipeline never exposes — with no language it warns and
+// forces English, and a forced English pass returns a fluent translation rather than
+// anything a text classifier could flag), the second transcribes in that language.
+// The encoder is the cost of a pass; the detection step is one token.
+async function detectAndTranscribe(audio, fallbackLang) {
+  const { model, processor, tokenizer } = transcriber;
+  const gc = model._prepare_generation_config(null, {});
+  // generate() filters its arguments through the model's forward_params, and
+  // Whisper's list does not name encoder_outputs: without this the precomputed
+  // encoder state is dropped and the encoder runs again for each of the two calls.
+  if (!model.forward_params.includes('encoder_outputs')) {
+    model.forward_params = [...model.forward_params, 'encoder_outputs'];
+  }
+  const { input_features } = await processor(audio);
+  const { encoder_outputs } = await model._prepare_encoder_decoder_kwargs_for_generation({
+    inputs_tensor: input_features,
+    model_inputs: { input_features },
+    model_input_name: 'input_features',
+    generation_config: gc,
+  });
+  const probe = await model.generate({
+    inputs: input_features,
+    encoder_outputs,
+    decoder_input_ids: [gc.decoder_start_token_id],
+    max_new_tokens: 1,
+  });
+  const probed = probe.tolist()[0].map(Number);
+  const lang = langFromToken(gc.lang_to_id, probed.at(-1)) || fallbackLang;
+  const ids = await model.generate({
+    inputs: input_features,
+    encoder_outputs,
+    language: WHISPER_NAME[lang] || 'english',
+    task: 'transcribe',
+  });
+  const text = tokenizer.decode(ids.tolist()[0].map(Number), { skip_special_tokens: true });
+  return { text: (text || '').trim(), lang };
+}
+
 // Guarded so Node can import loadAttempts for the unit tests: there `self` does
 // not exist, and this file must stay importable without a worker harness.
 if (typeof self !== 'undefined') self.onmessage = async (e) => {
@@ -126,6 +182,14 @@ if (typeof self !== 'undefined') self.onmessage = async (e) => {
       }
       await ready; // wait for the first load instead of dropping the audio
       if (!transcriber) throw new Error('El modelo no se pudo cargar.');
+      if (msg.detect && canDetect()) {
+        const detected = await detectAndTranscribe(msg.audio, msg.lang || sessionLang);
+        self.postMessage({ type: 'result', id: msg.id, text: detected.text, lang: detected.lang });
+        return;
+      }
+      // Pieces are at most MAX_SEG_MS and previews carry at most PREVIEW_TAIL_MS, so
+      // the path above needs no chunking; this one keeps it for the sessions that pin
+      // a language, where there is nothing to detect.
       const opts = { chunk_length_s: 30, return_timestamps: false };
       if (!/\.en$/.test(modelId || '')) {
         // Per request, not per session: in a bilingual meeting consecutive segments
@@ -136,7 +200,7 @@ if (typeof self !== 'undefined') self.onmessage = async (e) => {
         opts.task = 'transcribe';
       }
       const out = await transcriber(msg.audio, opts);
-      self.postMessage({ type: 'result', id: msg.id, text: (out && out.text) || '' });
+      self.postMessage({ type: 'result', id: msg.id, text: (out && out.text) || '', lang: null });
     }
   } catch (err) {
     self.postMessage({ type: 'error', id: msg.id, message: err?.message || String(err) });

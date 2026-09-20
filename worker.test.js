@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { loadAttempts, modelForLang } from './worker.js';
+import { langFromToken, loadAttempts, modelForLang } from './worker.js';
 
 test('a Spanish session swaps the English-only model for the multilingual one', () => {
   assert.equal(modelForLang('onnx-community/whisper-base.en', 'es'), 'onnx-community/whisper-base');
@@ -36,4 +36,14 @@ test('wasm ladder never touches webgpu and ends unquantized', () => {
   assert.deepEqual(attempts, [['wasm', 'q4'], ['wasm', 'fp32']]);
   assert.ok(attempts.every(([dev]) => dev === 'wasm'));
   assert.equal(attempts.at(-1)[1], 'fp32');
+});
+
+test('langFromToken maps the two languages in scope and nothing else', () => {
+  const lang_to_id = { '<|en|>': 50259, '<|es|>': 50262, '<|fr|>': 50265 };
+  assert.equal(langFromToken(lang_to_id, 50259), 'en');
+  assert.equal(langFromToken(lang_to_id, 50262), 'es');
+  // A third language is no evidence for either of the two the product knows.
+  assert.equal(langFromToken(lang_to_id, 50265), null);
+  assert.equal(langFromToken(lang_to_id, 1), null);
+  assert.equal(langFromToken(null, 50259), null);
 });
