@@ -2,7 +2,7 @@ import { DEFAULT_COACH, CONTEXT_MAX_CHARS, PROFILE_MAX_CHARS } from './coach.js'
 import { toSpanish } from './translate.js';
 import { phraseCategories } from './phrasebook.js';
 import { installLive } from './live.js';
-import { resolveChips, toggleNoteOpen, addNote, NOTE_TITLE_MAX, NOTE_BODY_MAX } from './phrasebook.js';
+import { resolveChips, NOTE_TITLE_MAX, NOTE_BODY_MAX } from './phrasebook.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -371,8 +371,7 @@ els.tabPhrases.addEventListener('click', () => { tab = 'phrases'; renderCoach();
 els.tabNotes.addEventListener('click', () => { tab = 'notes'; renderCoach(); });
 
 async function toggleNote(id) {
-  const { settings: stored = {} } = await chrome.storage.local.get('settings');
-  await chrome.storage.local.set({ settings: toggleNoteOpen(stored, id) });
+  await chrome.runtime.sendMessage({ type: 'TOGGLE_NOTE', id }).catch(() => {});
   // No re-render here: the write trips storage.onChanged in background.js, which
   // re-broadcasts COACH_CHIPS to all three views at once.
 }
@@ -582,9 +581,7 @@ async function loadDevices() {
 }
 
 async function saveUi() {
-  const { settings: stored = {} } = await chrome.storage.local.get('settings');
-  const next = {
-    ...stored,
+  const patch = {
     lang: els.lang.value,
     themSource: els.themSource.value,
     themDeviceId: els.themDevice.value || null,
@@ -592,8 +589,8 @@ async function saveUi() {
     sessionContext: els.sessionContext.value.trim().slice(0, CONTEXT_MAX_CHARS),
     profile: els.profile.value.trim().slice(0, PROFILE_MAX_CHARS),
   };
-  await chrome.storage.local.set({ settings: next });
-  settings = { ...DEFAULT_COACH, ...next };
+  const res = await chrome.runtime.sendMessage({ type: 'PATCH_SETTINGS', patch }).catch(() => null);
+  settings = { ...DEFAULT_COACH, ...((res && res.settings) || { ...settings, ...patch }) };
 }
 
 async function init() {
@@ -648,10 +645,10 @@ els.profile.addEventListener('change', saveUi);
 
 els.noteForm.addEventListener('submit', async (e) => {
   e.preventDefault();
-  const { settings: stored = {} } = await chrome.storage.local.get('settings');
-  const next = addNote(stored, { title: els.noteTitle.value, body: els.noteBody.value });
-  if (next === stored) return;
-  await chrome.storage.local.set({ settings: next });
+  const title = els.noteTitle.value;
+  const body = els.noteBody.value;
+  if (!title.trim() && !body.trim()) return;
+  await chrome.runtime.sendMessage({ type: 'ADD_NOTE', title, body }).catch(() => {});
   els.noteForm.reset();
   els.noteAdd.open = false;
   // No re-render here: the write trips storage.onChanged in background.js, which

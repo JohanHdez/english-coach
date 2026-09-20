@@ -351,6 +351,24 @@ async function forwardToOffscreen(type) {
   return chrome.runtime.sendMessage({ target: 'offscreen', type });
 }
 
+// Settings are one object that several views want to change one field of, at
+// the same time — a note toggled from the overlay while one is added from the
+// panel, the start button's save while a note lands. Read-modify-write from two
+// places loses whichever write comes second. So every change funnels through here,
+// queued: the worker is the only writer, and it writes one at a time. Module state
+// is ephemeral, which is fine — a suspended worker has nothing in flight.
+let settingsWrites = Promise.resolve();
+function patchSettings(mutate) {
+  const run = settingsWrites.then(async () => {
+    const { settings = {} } = await chrome.storage.local.get('settings');
+    const next = mutate(settings);
+    await chrome.storage.local.set({ settings: next });
+    return next;
+  });
+  settingsWrites = run.catch(() => {});
+  return run;
+}
+
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   // Everything the offscreen document broadcasts for the UIs is mirrored into the tab.
   if (msg.target === 'ui') {
@@ -439,17 +457,17 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         }
         // The overlay has no chrome.storage: it parks the pill and mutes a site here.
         case 'PILL_POS': {
-          const { settings = {} } = await chrome.storage.local.get('settings');
-          await chrome.storage.local.set({ settings: { ...settings, pillPos: msg.pos } });
+          await patchSettings((s) => ({ ...s, pillPos: msg.pos }));
           sendResponse({ ok: true });
           break;
         }
         case 'PILL_HIDE': {
-          const { settings = {} } = await chrome.storage.local.get('settings');
           const host = String(msg.host || '').toLowerCase();
-          const hosts = new Set(settings.pillHiddenHosts || []);
-          if (host) hosts.add(host);
-          await chrome.storage.local.set({ settings: { ...settings, pillHiddenHosts: [...hosts] } });
+          await patchSettings((s) => {
+            const hosts = new Set(s.pillHiddenHosts || []);
+            if (host) hosts.add(host);
+            return { ...s, pillHiddenHosts: [...hosts] };
+          });
           sendResponse({ ok: true });
           break;
         }
@@ -465,16 +483,21 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         // The overlay has no chrome.storage: it flips a note's open state here.
         // Only the write happens — storage.onChanged re-broadcasts COACH_CHIPS.
         case 'TOGGLE_NOTE': {
-          const { settings = {} } = await chrome.storage.local.get('settings');
-          await chrome.storage.local.set({ settings: toggleNoteOpen(settings, msg.id) });
+          await patchSettings((s) => toggleNoteOpen(s, msg.id));
           sendResponse({ ok: true });
           break;
         }
         // Same shape as TOGGLE_NOTE: only the write happens here.
         case 'ADD_NOTE': {
-          const { settings = {} } = await chrome.storage.local.get('settings');
-          await chrome.storage.local.set({ settings: addNote(settings, { title: msg.title, body: msg.body }) });
+          await patchSettings((s) => addNote(s, { title: msg.title, body: msg.body }));
           sendResponse({ ok: true });
+          break;
+        }
+        // The side panel's own fields (language, source, context, profile): a
+        // shallow merge over the stored object, queued like every other write.
+        case 'PATCH_SETTINGS': {
+          const settings = await patchSettings((s) => ({ ...s, ...(msg.patch || {}) }));
+          sendResponse({ ok: true, settings });
           break;
         }
         case 'OPEN_REPORT': {

@@ -41,6 +41,7 @@ overlay / sidepanel / setup ──► background ──► offscreen ──► w
 | `STORE_SET` | `items` | as above |
 | `TOGGLE_NOTE` | `id` | flips a note's `open` in settings; the write re-broadcasts `COACH_CHIPS` |
 | `ADD_NOTE` | `title`, `body` (strings; the service worker clamps them with `addNote`) | adds a note to settings via `addNote`; reply `{ ok }`; the write re-broadcasts `COACH_CHIPS`, so no view re-renders on its own |
+| `PATCH_SETTINGS` | `patch` (an object whose keys are settings fields, merged over the stored object) | sent by `sidepanel.js`; reply `{ ok, settings }` with the result after the merge |
 | `PILL_POS` | `pos` (`{right, bottom}` from the corner) | parks the idle pill; the overlay has no storage of its own |
 | `PILL_HIDE` | `host` | adds the sender's hostname to `pillHiddenHosts`. Only the idle pill goes; the card still opens from the icon, the shortcut or the context menu |
 
@@ -121,3 +122,10 @@ overlay / sidepanel / setup ──► background ──► offscreen ──► w
     `phraseIds`, `customPhrases`, `notes` or `liveCoach` — and it is *not* cleared when a session
     ends. `UI_SYNC` does not trigger a new broadcast; it replays the cached `lastUi.chips` in its
     directed response, same as `attachOverlay` does when it re-injects the overlay.
+14. **Settings are written only by the service worker, one write at a time.** Every view that
+    reads the whole `settings` object, changes one field and writes it back is a race with every
+    other view doing the same — a note toggled from the overlay while one is added from the panel
+    silently loses whichever write lands second. `background.js` funnels every change through
+    `patchSettings`, a queue of one write after another; a view that wants a field changed sends
+    `TOGGLE_NOTE`, `ADD_NOTE`, `PILL_POS`, `PILL_HIDE` or `PATCH_SETTINGS` instead of calling
+    `chrome.storage.local.set({ settings })` itself.
