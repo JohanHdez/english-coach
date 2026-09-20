@@ -134,6 +134,20 @@ export function toggleNoteOpen(settings = {}, id) {
   return { ...settings, notes: notes.map((n) => (n ? { ...n, open: n.id === id && open } : n)) };
 }
 
+// Adding a note mid-conversation is a settings write like toggling one, from the
+// same two contexts, so it lives here for the same reason. The new note opens and
+// the others close: a note written while someone waits is wanted on screen now,
+// and one open note at a time is the rule toggleNoteOpen already keeps.
+export function addNote(settings = {}, { title, body } = {}) {
+  const notes = Array.isArray(settings.notes) ? settings.notes : [];
+  const t = clamp(title, NOTE_TITLE_MAX);
+  const b = clamp(body, NOTE_BODY_MAX);
+  if (!t && !b) return settings;
+  if (notes.length >= MAX_NOTES) return settings;
+  const note = { id: 'n.' + Date.now(), title: t, body: b, open: true };
+  return { ...settings, notes: [...notes.map((n) => (n ? { ...n, open: false } : n)), note] };
+}
+
 // Matching the language subtag, not a prefix: "eng-X" is not English here, and
 // some platforms report the tag with an underscore.
 const EN = /^en(?:[-_]|$)/i;

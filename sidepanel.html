@@ -50,6 +50,11 @@
         <textarea id="sessionContext" rows="2" placeholder="entrevista técnica de Angular: signals, RxJS…"></textarea>
       </label>
 
+      <details class="field more" id="profileMore">
+        <summary>Mi perfil <span class="hint">· lo que el coach sabe de ti</span></summary>
+        <textarea id="profile" rows="3" placeholder="8 años con Angular. Migré la plataforma de pagos…"></textarea>
+      </details>
+
       <button id="toggle" class="primary">● Empezar</button>
       <p id="status" class="status">Listo.</p>
       <p id="liveNote" class="live-note" hidden>
@@ -70,6 +75,14 @@
       </div>
       <div id="notesPane" class="pane" hidden>
         <div id="notes" class="note-list"></div>
+        <details id="noteAdd" class="note-add">
+          <summary>＋ Añadir nota</summary>
+          <form id="noteForm" class="note-form">
+            <input id="noteTitle" type="text" placeholder="Título corto" />
+            <textarea id="noteBody" rows="3" placeholder="Lo que quieras tener a mano ahora mismo"></textarea>
+            <button id="noteSave" class="small primary" type="submit">Guardar nota</button>
+          </form>
+        </details>
       </div>
       <div id="replyBox" class="reply" hidden>
         <p id="replyStatus" class="reply-status" hidden></p>

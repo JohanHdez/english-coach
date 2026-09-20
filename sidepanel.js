@@ -1,8 +1,8 @@
-import { DEFAULT_COACH, CONTEXT_MAX_CHARS } from './coach.js';
+import { DEFAULT_COACH, CONTEXT_MAX_CHARS, PROFILE_MAX_CHARS } from './coach.js';
 import { toSpanish } from './translate.js';
 import { phraseCategories } from './phrasebook.js';
 import { installLive } from './live.js';
-import { resolveChips, toggleNoteOpen } from './phrasebook.js';
+import { resolveChips, toggleNoteOpen, addNote, NOTE_TITLE_MAX, NOTE_BODY_MAX } from './phrasebook.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -11,6 +11,7 @@ const els = {
   lang: $('lang'),
   themSource: $('themSource'), themDevice: $('themDevice'), deviceField: $('deviceField'),
   captureMic: $('captureMic'), settings: $('settings'), sessionContext: $('sessionContext'),
+  profile: $('profile'), noteAdd: $('noteAdd'), noteForm: $('noteForm'), noteTitle: $('noteTitle'), noteBody: $('noteBody'),
   coach: $('coach'), askReply: $('askReply'),
   phrases: $('phrases'), notes: $('notes'), cats: $('cats'),
   tabPhrases: $('tabPhrases'), tabNotes: $('tabNotes'),
@@ -21,6 +22,10 @@ const els = {
   openWindow: $('openWindow'),
   liveNote: $('liveNote'), liveNoteText: $('liveNoteText'), liveNoteAction: $('liveNoteAction'),
 };
+
+els.noteTitle.maxLength = NOTE_TITLE_MAX;
+els.noteBody.maxLength = NOTE_BODY_MAX;
+els.profile.maxLength = PROFILE_MAX_CHARS;
 
 let running = false;
 let entries = [];
@@ -306,11 +311,10 @@ function renderCoach() {
   // A tab with nothing behind it is a dead end: hide it and, if it was the open
   // one, fall through to the tab that does have something.
   els.tabPhrases.hidden = !phrases.length;
-  els.tabNotes.hidden = !notes.length;
+  els.tabNotes.hidden = false;
   els.tabPhrases.querySelector('.count').textContent = phrases.length;
   els.tabNotes.querySelector('.count').textContent = notes.length;
   if (tab === 'phrases' && !phrases.length) tab = 'notes';
-  if (tab === 'notes' && !notes.length) tab = 'phrases';
   els.tabPhrases.classList.toggle('on', tab === 'phrases');
   els.tabNotes.classList.toggle('on', tab === 'notes');
   els.phrasesPane.hidden = tab !== 'phrases';
@@ -586,6 +590,7 @@ async function saveUi() {
     themDeviceId: els.themDevice.value || null,
     captureMic: els.captureMic.checked,
     sessionContext: els.sessionContext.value.trim().slice(0, CONTEXT_MAX_CHARS),
+    profile: els.profile.value.trim().slice(0, PROFILE_MAX_CHARS),
   };
   await chrome.storage.local.set({ settings: next });
   settings = { ...DEFAULT_COACH, ...next };
@@ -606,6 +611,7 @@ async function init() {
   els.themSource.value = settings.themSource || 'tab';
   els.captureMic.checked = settings.captureMic !== false;
   els.sessionContext.value = settings.sessionContext || '';
+  els.profile.value = settings.profile || '';
   entries = transcript;
   render();
   await loadDevices();
@@ -638,6 +644,19 @@ els.captureMic.addEventListener('change', saveUi);
 // purpose: the offscreen document re-reads settings on every coach call, so
 // notes edited mid-interview reach the very next suggested reply.
 els.sessionContext.addEventListener('change', saveUi);
+els.profile.addEventListener('change', saveUi);
+
+els.noteForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const { settings: stored = {} } = await chrome.storage.local.get('settings');
+  const next = addNote(stored, { title: els.noteTitle.value, body: els.noteBody.value });
+  if (next === stored) return;
+  await chrome.storage.local.set({ settings: next });
+  els.noteForm.reset();
+  els.noteAdd.open = false;
+  // No re-render here: the write trips storage.onChanged in background.js, which
+  // re-broadcasts COACH_CHIPS to every view, this one included.
+});
 
 els.toggle.addEventListener('click', async () => {
   if (running) {

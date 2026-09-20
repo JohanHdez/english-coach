@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   CATALOGUE, DEFAULT_PHRASE_IDS, resolvePhrases, resolveNotes, resolveChips,
-  NOTE_TITLE_MAX, NOTE_BODY_MAX, MAX_NOTES, MAX_CUSTOM, toggleNoteOpen, pickEnglishVoice,
+  NOTE_TITLE_MAX, NOTE_BODY_MAX, MAX_NOTES, MAX_CUSTOM, toggleNoteOpen, addNote, pickEnglishVoice,
   CUSTOM_CAT, phraseCategories,
 } from './phrasebook.js';
 
@@ -231,4 +231,29 @@ test('opening a note closes whichever one was open', () => {
 test('toggling the open note closes it and leaves the rest closed', () => {
   const settings = { notes: [{ id: 'a', title: 'a', open: true }, { id: 'b', title: 'b' }] };
   assert.deepEqual(toggleNoteOpen(settings, 'a').notes.map((n) => n.open), [false, false]);
+});
+
+test('addNote appends an open note and closes the others', () => {
+  const before = { notes: [{ id: 'n.1', title: 'Daily', body: 'x', open: true }] };
+  const after = addNote(before, { title: 'Salary', body: 'Ask about the band.' });
+  assert.equal(after.notes.length, 2);
+  assert.equal(after.notes[0].open, false);
+  assert.deepEqual({ title: after.notes[1].title, body: after.notes[1].body, open: after.notes[1].open },
+    { title: 'Salary', body: 'Ask about the band.', open: true });
+  assert.ok(after.notes[1].id.startsWith('n.'));
+  assert.notEqual(after, before);
+  assert.equal(before.notes.length, 1, 'the input is not mutated');
+});
+
+test('addNote ignores an empty note and returns the same settings object', () => {
+  const before = { notes: [] };
+  assert.equal(addNote(before, { title: '   ', body: '' }), before);
+});
+
+test('addNote respects the cap and clamps the lengths', () => {
+  const full = { notes: Array.from({ length: MAX_NOTES }, (_, i) => ({ id: `n.${i}`, title: 't', body: 'b', open: false })) };
+  assert.equal(addNote(full, { title: 'one more', body: '' }), full);
+  const long = addNote({ notes: [] }, { title: 'x'.repeat(NOTE_TITLE_MAX + 5), body: 'y'.repeat(NOTE_BODY_MAX + 5) });
+  assert.equal(long.notes[0].title.length, NOTE_TITLE_MAX);
+  assert.equal(long.notes[0].body.length, NOTE_BODY_MAX);
 });
