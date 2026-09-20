@@ -159,6 +159,20 @@ export class Session {
       }); true`);
     await session.applySettings(settings);
     await session.prepareLive(log);
+    // The panel already rendered once against the old document, from whatever
+    // storage held before applySettings() cleared it. A reload gives it a clean
+    // first render, on the new document prepareLive() just registered its
+    // stand-ins for — the only way the translator stub is there before the
+    // panel's own init() ever runs, on every run, not just the second one.
+    await chrome.send('Page.enable', {}, page);
+    const loaded2 = chrome.waitFor((method, params, sessionId) => method === 'Page.loadEventFired' && sessionId === page, { label: 'Page.loadEventFired' });
+    await chrome.send('Page.reload', {}, page);
+    await loaded2;
+    // A listener does not survive the navigation; Runtime.addBinding does.
+    await chrome.evaluate(page, `
+      chrome.runtime.onMessage.addListener((m) => {
+        if (m && m.target === 'ui') __e2e(JSON.stringify({ t: Date.now(), ...m }));
+      }); true`);
     return session;
   }
 
@@ -181,7 +195,7 @@ export class Session {
       })()`);
     }
     if (this.settings.translate) {
-      wants.push(`(async () => {
+      const translatorExpr = `(async () => {
         const stub = () => {
           globalThis.Translator = {
             availability: async () => 'available',
@@ -204,7 +218,17 @@ export class Session {
         } catch (e) {
           return stub() + ' — the real one failed: ' + e.message;
         }
-      })()`);
+      })()`;
+      // The panel's own init() renders whatever transcript storage already has as
+      // soon as the document loads, before this function's evaluate() below ever
+      // runs — a leftover 'them' turn from an earlier --translate run would call
+      // the real Translator first and its permanent failure cache in translate.js
+      // would outlive the stand-in installed a moment later. Registering the stub
+      // to run on the next document, ahead of the panel's own scripts, is what
+      // Session.open()'s reload after prepareLive() relies on.
+      await this.chrome.send('Page.enable', {}, this.page);
+      await this.chrome.send('Page.addScriptToEvaluateOnNewDocument', { source: translatorExpr }, this.page);
+      wants.push(translatorExpr);
     }
     // A pack that will not install is reported, not fatal: the run then measures
     // whichever lane is left, and the log says which.
