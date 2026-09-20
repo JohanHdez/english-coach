@@ -114,6 +114,7 @@ function init(model, device, base, lang = 'en') {
 }
 
 const WHISPER_NAME = { en: 'english', es: 'spanish' };
+let detectBroken = false; // so a dead detection path is reported once, not per segment
 
 // Whether the loaded export has a language to name at all: the .en models carry no
 // language table, and asking them for one throws inside generate().
@@ -183,9 +184,19 @@ if (typeof self !== 'undefined') self.onmessage = async (e) => {
       await ready; // wait for the first load instead of dropping the audio
       if (!transcriber) throw new Error('El modelo no se pudo cargar.');
       if (msg.detect && canDetect()) {
-        const detected = await detectAndTranscribe(msg.audio, msg.lang || sessionLang);
-        self.postMessage({ type: 'result', id: msg.id, text: detected.text, lang: detected.lang });
-        return;
+        try {
+          const detected = await detectAndTranscribe(msg.audio, msg.lang || sessionLang);
+          self.postMessage({ type: 'result', id: msg.id, text: detected.text, lang: detected.lang });
+          return;
+        } catch (err) {
+          // Detection reaches into vendored internals that a refresh of vendor/ can
+          // change or remove. An unlabelled turn is a worse turn; a throw here would
+          // be no turn at all, for every segment of the session.
+          if (!detectBroken) {
+            detectBroken = true;
+            console.warn('[worker] native language detection unavailable, falling back to the pipeline:', err?.message || err);
+          }
+        }
       }
       // Pieces are at most MAX_SEG_MS and previews carry at most PREVIEW_TAIL_MS, so
       // the path above needs no chunking; this one keeps it for the sessions that pin
