@@ -389,7 +389,30 @@ export function analyse({ t0, events }, manifest, { speaker = 'me' } = {}) {
 
   const errors = events.filter((e) => e.type === 'STATUS' && e.kind === 'error').map((e) => e.text);
   const maxPending = Math.max(0, ...events.filter((e) => e.type === 'QUEUE').map((e) => e.pending || 0));
-  return { rows, previews: partials.filter((p) => (p.text || '').trim()).length, maxPending, errors };
+
+  // Bubbles of this speaker: how many, how long the longest got, the largest text
+  // one repaint asked the views to retranslate, and whether every bubble that
+  // was followed by another ends at a finished sentence.
+  const byKey = new Map();
+  let largestRepaint = 0;
+  for (const e of events) {
+    if (e.type !== 'SEGMENT' || !e.entry || e.entry.speaker !== speaker) continue;
+    const key = `${e.entry.speaker}@${e.entry.t}`;
+    const text = e.entry.text || '';
+    if (byKey.has(key)) largestRepaint = Math.max(largestRepaint, text.length);
+    byKey.set(key, text);
+  }
+  const texts = [...byKey.values()];
+  const closed = texts.slice(0, -1);
+  const bubbles = {
+    count: texts.length,
+    longestChars: Math.max(0, ...texts.map((t) => t.length)),
+    largestRepaintChars: largestRepaint,
+    closed: closed.length,
+    closedAtSentenceEnd: closed.filter((t) => /[.!?…]["'"')\]]*$/.test(t.trim())).length,
+  };
+
+  return { rows, bubbles, previews: partials.filter((p) => (p.text || '').trim()).length, maxPending, errors };
 }
 
 // Stretches, while a sentence was being spoken, during which the speaker's live

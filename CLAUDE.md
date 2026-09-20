@@ -162,7 +162,8 @@ Web Speech pack into its throwaway profile first, so that lane is measured with 
 word-by-word recogniser a real install has — the Whisper preview lane alone hid the bug
 that blanked the line at the first forced cut. The run reports every stretch longer than
 2.5 s in which the live line was empty while a sentence was being spoken, both as sent
-(PARTIAL) and as painted in the side panel.
+(PARTIAL) and as painted in the side panel. The run also counts the speaker's bubbles: how many, the longest, the largest text a single
+repaint retranslated, and whether every closed bubble ends at a finished sentence.
 
 It covers device lanes only: Chrome grants tab audio on a user invocation alone, so the tab
 lane stays a manual check. It needs no dependencies (Node 22+, `say`, `afconvert`) and nothing

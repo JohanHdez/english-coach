@@ -99,6 +99,8 @@ if (flag('json', false) === true) {
   const spans = (list) => (list.length ? list.map((s) => `${s.key} ${(s.from / 1000).toFixed(1)}–${(s.to / 1000).toFixed(1)}s (${(s.ms / 1000).toFixed(1)}s${s.open ? ', never came back' : ''})`).join(', ') : 'none');
   console.log(`\nlive line of ${speaker} while speaking · blank >2.5s as sent: ${spans(report.live.sentBlank)}`);
   console.log(`live line of ${speaker} while speaking · blank >2.5s as painted: ${spans(report.live.paintedBlank)} · painted samples ${report.live.paintedSamples}, with Spanish ${report.live.translatedSamples}`);
+  const b = report.bubbles;
+  console.log(`bubbles of ${speaker}: ${b.count} · longest ${b.longestChars} chars · largest repaint ${b.largestRepaintChars} chars · closed at a sentence end ${b.closedAtSentenceEnd}/${b.closed}`);
   if (report.errors.length) console.log('\nerrors:\n  ' + report.errors.join('\n  '));
   const noise = result.console.filter((c) => c.level === 'error' || c.level === 'exception');
   if (noise.length) console.log('\nconsole errors:\n  ' + noise.map((c) => `${c.where}: ${c.text}`).join('\n  '));
