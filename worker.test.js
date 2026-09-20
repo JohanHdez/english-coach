@@ -13,6 +13,14 @@ test('an English session keeps the configured model untouched', () => {
   assert.equal(modelForLang('onnx-community/whisper-base.en', undefined), 'onnx-community/whisper-base.en');
 });
 
+test('a bilingual session loads the multilingual model', () => {
+  // The .en exports only understand English, so a bilingual meeting would transcribe
+  // every Spanish turn as English that was never said.
+  assert.equal(modelForLang('onnx-community/whisper-base.en', 'multi'), 'onnx-community/whisper-base');
+  assert.equal(modelForLang('onnx-community/whisper-small.en', 'multi'), 'onnx-community/whisper-small');
+  assert.equal(modelForLang('onnx-community/whisper-tiny.en', 'multi'), 'onnx-community/whisper-tiny');
+});
+
 // q8 is deliberately absent: the vendored ONNX Runtime (1.26) rejects every old
 // q8 Whisper export, so that rung always failed. Restore q8 first when vendor/
 // carries ort-web >= 1.27.

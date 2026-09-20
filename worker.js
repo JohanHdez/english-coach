@@ -11,11 +11,14 @@ let loadFailedAt = 0;
 const RETRY_COOLDOWN_MS = 60000; // segments arrive every few seconds; without
                                  // this a dead network would re-download per segment
 
-// The .en Whisper exports only understand English: a Spanish session silently
-// transcribing garbage would be worse than a bigger download, so the model is
-// swapped for its multilingual sibling instead.
+// The .en Whisper exports only understand English: a session that is not purely
+// English silently transcribing garbage would be worse than a bigger download, so
+// the model is swapped for its multilingual sibling instead. Stated as "anything
+// but English" rather than "Spanish", so a new session language cannot quietly
+// inherit an English-only model. A missing lang defaults to English, matching
+// init()'s own default parameter.
 export function modelForLang(model, lang) {
-  return lang === 'es' ? String(model).replace(/\.en$/, '') : model;
+  return (lang == null || lang === 'en') ? model : String(model).replace(/\.en$/, '');
 }
 
 function configure(base) {
@@ -125,7 +128,11 @@ if (typeof self !== 'undefined') self.onmessage = async (e) => {
       if (!transcriber) throw new Error('El modelo no se pudo cargar.');
       const opts = { chunk_length_s: 30, return_timestamps: false };
       if (!/\.en$/.test(modelId || '')) {
-        opts.language = sessionLang === 'es' ? 'spanish' : 'english';
+        // Per request, not per session: in a bilingual meeting consecutive segments
+        // are in different languages, and a multilingual model decodes whichever
+        // language its token names.
+        const lang = msg.lang || sessionLang;
+        opts.language = lang === 'es' ? 'spanish' : 'english';
         opts.task = 'transcribe';
       }
       const out = await transcriber(msg.audio, opts);

@@ -242,7 +242,7 @@ function ensureWorker() {
   return worker;
 }
 
-function localTranscribe(audio) {
+function localTranscribe(audio, lang) {
   return new Promise((resolve, reject) => {
     const id = ++state.seq;
     const worker = ensureWorker();
@@ -263,7 +263,7 @@ function localTranscribe(audio) {
       else reject(new Error(m.message));
     };
     worker.addEventListener('message', onMsg);
-    worker.postMessage({ type: 'transcribe', id, audio }, [audio.buffer]);
+    worker.postMessage({ type: 'transcribe', id, audio, lang }, [audio.buffer]);
   });
 }
 
@@ -365,7 +365,7 @@ function drain() {
 async function transcribe(seg, lane) {
   const startedAt = Date.now();
   try {
-    const text = lane === 'api' ? await apiTranscribe(seg.audio) : await localTranscribe(seg.audio);
+    const text = lane === 'api' ? await apiTranscribe(seg.audio) : await localTranscribe(seg.audio, state.lang[seg.speaker]);
     const clean = (text || '').trim();
     if (seg.preview) {
       // Consecutive rounds, which is what the constant has always claimed. Counting
