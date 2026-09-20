@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   Segmenter, isJunk, floatToWav, foldIntoTranscript,
   CHUNK_MS, SILENCE_MS, MAX_SEG_MS, SOFT_CUT_MS, SOFT_SILENCE_MS, MIN_VOICED, PREROLL,
-  MERGE_GAP_MS, MERGE_MAX_CHARS, PREVIEW_EVERY_MS, PREVIEW_MIN_MS, PREVIEW_TAIL_MS, SR,
+  MERGE_GAP_MS, MERGE_MAX_CHARS, PREVIEW_EVERY_MS, PREVIEW_MIN_MS, SR,
 } from './segmenter.js';
 
 const VOICE = 0.5;
@@ -55,7 +55,7 @@ test('a breath dip before SOFT_CUT_MS does not cut', () => {
 });
 
 test('speech with no dips at all still hits the hard cut', () => {
-  const segs = run([[VOICE, 200], [QUIET, 8]]);
+  const segs = run([[VOICE, 90], [QUIET, 8]]);
   assert.equal(segs[0].durationMs, MAX_SEG_MS);
   assert.equal(segs.length, 2);
 });
@@ -203,7 +203,7 @@ test('mid-speech cuts are open, a real pause closes', () => {
 });
 
 test('the hard cut also leaves the phrase open', () => {
-  const segs = run([[VOICE, 200], [QUIET, 8]]);
+  const segs = run([[VOICE, 90], [QUIET, 8]]);
   assert.equal(segs[0].durationMs, MAX_SEG_MS);
   assert.equal(segs[0].open, true);
 });
@@ -316,7 +316,9 @@ test('silence alone is never previewed', () => {
 });
 
 test('previews are spaced by PREVIEW_EVERY_MS', () => {
-  const { previews } = runWithPreview([[VOICE, 100]]);
+  // Short enough to stay under MAX_SEG_MS: a forced cut mid-run would reset the
+  // phrase and break the uniform spacing this test checks.
+  const { previews } = runWithPreview([[VOICE, 60]]);
   assert.ok(previews.length >= 3, `expected several previews, got ${previews.length}`);
   for (let i = 1; i < previews.length; i++) {
     assert.equal(previews[i].durationMs - previews[i - 1].durationMs, PREVIEW_EVERY_MS);
@@ -358,14 +360,20 @@ test('without an onPreview callback the segmenter behaves exactly as before', ()
 test('a preview never carries more than the tail window, however long the phrase', () => {
   const previews = [];
   let t = 0;
-  const seg = new Segmenter('them', () => {}, () => t, { onPreview: (p) => previews.push(p) });
+  // A window shorter than MAX_SEG_MS: at the default they now coincide, and the
+  // forced cut would retire each piece right as it reached the window, so the cap
+  // under test would never actually be exercised.
+  const previewTailMs = 3000;
+  const seg = new Segmenter('them', () => {}, () => t, { onPreview: (p) => previews.push(p), previewTailMs });
   for (let i = 0; i < 10; i++) { t += CHUNK_MS; seg.push(block(QUIET)); }
   // 30 s of unbroken speech — a synthetic voice with no breath dips, which is the
   // case that used to make every pass slower than the last until the lane retired.
+  // It now spans several forced cuts of the new, shorter MAX_SEG_MS; the cap must
+  // hold within each piece.
   for (let i = 0; i < 300; i++) { t += CHUNK_MS; seg.push(block(VOICE)); }
 
-  assert.ok(previews.some((p) => p.durationMs > PREVIEW_TAIL_MS), 'the phrase must outgrow the window');
-  const cap = (PREVIEW_TAIL_MS / 1000) * SR;
+  assert.ok(previews.some((p) => p.durationMs > previewTailMs), 'the phrase must outgrow the window');
+  const cap = (previewTailMs / 1000) * SR;
   for (const p of previews) {
     assert.ok(p.audio.length <= cap + 1600, `${p.audio.length} samples is past the ${cap} window`);
   }
@@ -414,4 +422,11 @@ test('a refused preview does not spend the slot and is re-offered at once', () =
   t += CHUNK_MS;
   seg.push(block(VOICE));
   assert.equal(previews.length, 1, 'the lane waited instead of resuming on the first free block');
+});
+
+test('a speaker who never dips streams out in pieces of at most eight seconds', () => {
+  const segs = run([[VOICE, 200]]);   // 20 s without a single breath dip
+  assert.ok(segs.length >= 3, `expected forced cuts every eight seconds, got ${segs.length} pieces`);
+  for (const s of segs) assert.ok(s.durationMs <= 8000, `a piece lasted ${s.durationMs} ms`);
+  for (const s of segs.slice(0, -1)) assert.ok(s.open, 'a forced cut is an open cut');
 });

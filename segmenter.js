@@ -3,7 +3,11 @@
 export const SR = 16000;         // working sample rate
 export const CHUNK_MS = 100;     // block size the worklet delivers
 export const SILENCE_MS = 700;   // silence that closes a phrase
-export const MAX_SEG_MS = 18000; // forced cut
+// Forced cut. A speaker who never dips below SOFT_SILENCE_MS would otherwise hold
+// one segment for this long and see nothing of it until it ends. Pieces fold into
+// one bubble downstream (foldIntoTranscript), so a shorter ceiling costs nothing on
+// screen — it only bounds how late the first words of a monologue can be.
+export const MAX_SEG_MS = 8000;
 // A fast speaker without real pauses would otherwise produce one giant paragraph
 // that only appears (and gets translated) when they finally stop. Once a phrase
 // is SOFT_CUT_MS long, a mere breath dip of SOFT_SILENCE_MS closes it, so long
