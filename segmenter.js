@@ -293,8 +293,8 @@ export function foldIntoTranscript(transcript, entry, gapMs = MERGE_GAP_MS, maxC
   transcript.push(opened);
   if (head === before) return [opened];
   last.text = head;
-  // The cut fell inside the piece that just arrived, so the closed turn ends
-  // where that piece began; the boundary inside the piece is not known.
+  // The cut fell inside a piece whose inner boundary is not known, so the
+  // closed turn is stamped as ending where the new piece began.
   last.dur = Math.round((entry.t - last.t) / 100) / 10;
   return [last, opened];
 }

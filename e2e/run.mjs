@@ -51,6 +51,11 @@ if (engine === 'api' && real) {
   groqKey = 'e2e-mock';
 }
 
+if (flag('only-them', false) === true && Number(flag('lanes', 1)) !== 2) {
+  console.error('--only-them needs --lanes=2 (the learner\'s lane is the only one without it)');
+  process.exit(2);
+}
+
 const settings = settingsFor({
   engine,
   groqKey,

@@ -185,7 +185,7 @@ Skills: `/preflight`, `/add-provider`, `/release`.
 
 ## Known debt
 
-- `capture.js` and `report.js` are written to be testable but have no tests; the 142 that exist
+- `capture.js` and `report.js` are written to be testable but have no tests; the 158 that exist
   live in `coach`, `segmenter`, `worker`, `phrasebook`, `stitch`, `queue`, `langid` and `live`.
 - The built-in Translator cannot be created in the harness's throwaway profile, so `--translate`
   runs a stand-in that marks text `[es]` after 40 ms + 8 ms per character: it measures when
