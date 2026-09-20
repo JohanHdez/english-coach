@@ -129,7 +129,10 @@ the whole session — nothing regenerates them and nothing can time out or fail 
 **Notes.** Same section: your own free-form notes — a short title and the text you want at hand,
 for anything you keep forgetting to mention. Collapsed by default and opened with one click, and
 shared across views: opening a note in the overlay opens it in the side panel too, because it is
-settings state, not something either view owns on its own.
+settings state, not something either view owns on its own. Since v1.22.0 you can add one without
+leaving the conversation — the Notas tab in the side panel and in the overlay has an «Añadir
+nota» form — and edit your profile from the side panel, folded under «Contexto de hoy»: both
+reach the very next suggested reply.
 
 **Suggested reply.** If you get stuck, `⌘⇧E` (or `Ctrl+Shift+E`, or the «💡 Respuesta» button)
 gives you **one answer, not a menu**: in a live conversation you read the first option anyway, so
@@ -237,16 +240,16 @@ the API engine, and text only leaves if you enable the coach.
 | Processing | GPU (WebGPU) is much faster; CPU is the compatible mode |
 | Engine | Local Whisper (free, private) or the Groq API (`whisper-large-v3-turbo`, needs a key) |
 | Short utterances | Discards noise and lone filler sounds («hmm», «uh», «ah») instead of transcribing them |
-| Live transcription | Shows what is being said as it happens: Chrome's on-device recognition (139+) word by word where available, otherwise a provisional Whisper pass over the phrase still being spoken (~1 s blocks, local engine only). The authoritative turn replaces it when the phrase closes |
+| Live transcription | Shows what is being said as it happens: Chrome's on-device recognition (139+) word by word where available, otherwise a provisional Whisper pass over the phrase still being spoken (~1.5 s blocks, on both engines — on the Groq engine the local model is loaded for this alone). The authoritative turn replaces it when the phrase closes |
 | Translate to Spanish | A Spanish line under each of the other speaker's turns, using Chrome's built-in translator (138+). Free, no key, and the text never leaves the machine |
 | Show chips and notes | Toggles the phrase and notes bar during the conversation; needs no key either way |
 | Chips and notes | Curated phrase catalogue (tick or add your own) and free-form notes, both static, no key, no network |
 | Suggested reply | `⌘⇧E` for a one-answer reply, built to read out loud; needs an API key |
 | Report | Automatic on stop, or on demand with «Informe de la sesión»; needs an API key |
 | Separate window | Off by default: the coach lives inside the page. Turn it on if you are sharing the tab or want the coach on another monitor |
-| Your profile | Plain-text experience (max 1500 characters) so the suggested reply talks about what you actually did |
+| Your profile | Plain-text experience (max 1500 characters) so the suggested reply talks about what you actually did; editable mid-session from the side panel, folded under the context |
 | Today's context | Per-meeting notes (max 1500 characters) so the direct answer can also answer knowledge questions; editable mid-session from the side panel |
-| Conversation language | English (coach + translation) or Spanish (professional support: multilingual model, Spanish suggestions, communication-coach report); in the side panel, per session |
+| Conversation language | English (coach + translation), Spanish (professional support: multilingual model, Spanish suggestions, communication-coach report) or **Reunión bilingüe** — English and Spanish in the same call: every turn is transcribed in the language it was spoken in and tagged `EN`/`ES`, the Spanish line appears only under English turns, the multilingual `base` model (~150 MB) is used and Chrome's word-by-word recognition is off, because one recogniser listens for one language. In the side panel, per session |
 | Coach model | One shared model for the suggested reply and the report: Groq (`gpt-oss-20b/120b`, **free**) or Claude (`haiku-4-5`, `sonnet-5`, `opus-5`, **paid**) |
 | Shortcuts | `⌘⇧S` start/stop · `⌘⇧E` suggested reply. Change them at `chrome://extensions/shortcuts` |
 
@@ -309,10 +312,28 @@ Fixed in v1.18.0. The live line came only from Chrome's on-device speech recogni
 its language pack was missing — or macOS blocked it — that layer switched off silently: nothing
 appeared until Whisper closed the phrase, 4–6 s later. A second provisional lane now transcribes
 the phrase *while it is still open*, about once a second, so the English shows in ~1.5–2 s, in
-blocks rather than word by word. It runs only on the local engine, only while the transcription
-queue is idle, and retires itself if a pass costs more than it saves — it can never delay a real
-turn. The panel and the overlay now say which of the two layers is running, and offer to install
-the language pack right there when that is what is missing.
+blocks rather than word by word. It retires itself if a pass costs more than it saves. Since
+v1.21.0 it runs on both engines and takes priority over the queue — see the next entry. The
+panel and the overlay now say which of the two layers is running, and offer to install the
+language pack right there when that is what is missing.
+
+**The live line vanished while the other person was still talking, and my own voice never
+appeared live at all.** Fixed in v1.21.0, three separate causes. Every delivered turn blanked the
+provisional line, even when the cut was mid-sentence and the speaker had not paused — now only a
+phrase closed by a real pause clears it, and a mid-speech cut leaves the text standing until the
+next piece replaces it. Provisional passes were also refused whenever the engine had any real
+work, so the gap between a cut and its delivery had no live text by construction — they now take
+priority over the queue, on a budget that still guarantees a real turn cannot be starved. And the
+microphone had no provisional lane at all, so your own words only appeared once the whole phrase
+had been transcribed; both voices now have their own live line, yours in English only.
+
+**Choosing the Groq API engine left me with no live text whatsoever.** Fixed in v1.21.0. The
+provisional lane was disabled on that engine — one audio request per preview would have exhausted
+the free tier in minutes — which left the live line entirely to Chrome's on-device recognition,
+and that is silently unavailable on some machines. The engine setting now governs the
+authoritative turns only: provisional passes always run locally, so they cost nothing and never
+leave the machine, while the finished turns still go to Groq. The local model is therefore
+downloaded on that engine too, once.
 
 **`chrome://` pages, the Web Store and the extension's own pages cannot be captured.** That is a
 browser-level block.
@@ -365,6 +386,46 @@ windows, and it does not matter: the in-page overlay keeps showing everything an
 for replies and stop. If you hid it with «✕», it comes back with the next transcribed turn or on
 reload.
 
+**The other person spoke Spanish and the bubble came out in English — a fluent translation, or
+nonsense.** Since v1.22.0 choose «Reunión bilingüe — inglés y español» as the conversation
+language. Every turn is then transcribed in the language it was spoken in and tagged `EN`/`ES`,
+and the Spanish line appears only under English turns. On the Groq engine the language comes
+with the answer; on the local engine it is Whisper's own first token, read on every pass —
+forcing the model to English does not produce garbage a text classifier could catch, it produces
+a *translation*, which is why the tag has to come from the model itself.
+
+**On the Groq engine every turn landed about a second late once the live line was on.** Fixed in
+v1.22.0. One serial queue served two independent resources: a Groq request waited for the
+provisional GPU pass in flight, and the next provisional pass waited for the request. Each now
+has its own lane. Measured on an Intel-GPU Mac with a 0.9 s round trip, a turn lands 1.0–1.1 s
+after the sentence ends instead of 1.0–2.0 s, and the live line keeps painting while a request
+is out.
+
+**A long monologue only showed up when the speaker finally paused, and its last words were
+missing.** Fixed in v1.22.0. A stretch with no breath dip used to hold one 18 s segment; it is
+cut every 8 s now, and the pieces fold into one bubble. The words after such a cut — a few
+hundred milliseconds before a real pause — were discarded as a stray sound; they are kept.
+
+**On the Groq engine a red «Error del modelo» appeared although turns kept arriving.** Fixed in
+v1.22.0. Since v1.21.0 the local model is loaded on the Groq engine only to draw the live line;
+its failure was reported as if it were the engine. It now reads as the live line degrading, the
+session stays green, and a single failed pass no longer marks the model as dead.
+
+**A note added from the overlay vanished, or a profile edit made in Settings reverted when the
+session started.** Fixed in v1.22.0. Every view read the whole settings object, changed one
+field and wrote it all back, so two changes in flight lost whichever landed second. The service
+worker is now the only writer, one write at a time, and the side panel's profile and context
+fields follow what Settings last saved.
+
+**While the other person talked for half a minute without a pause, the live line vanished after
+the first bubble and only whole blocks arrived from then on.** Fixed in v1.22.1. The on-device
+recogniser holds one growing result for as long as the speaker never pauses, and every Whisper
+turn — one every 8 s during a monologue — reset the line by skipping that result whole, so the
+words still being said were hidden until the speaker finally stopped. The reset now skips only
+what the bubble already holds. Measured on a 34 s monologue: the line was blank from 11.8 s to
+the end before, and never for more than 2.5 s after. Translation was not involved: the same
+blackout happened with it off.
+
 ## Known limits
 
 - The VAD is energy-based: in very noisy places it may cut too aggressively. Tune `SILENCE_MS`,
@@ -372,7 +433,11 @@ reload.
 - Pieces of a long monologue are transcribed independently, so Whisper tends to
   capitalise and full-stop each one: a single flowing sentence may appear as two or
   three fragments in the transcript. That is the deliberate trade for seeing the text
-  while the person is still talking.
+  while the person is still talking. A stretch with no breath dip at all is cut every 8 s.
+- In a bilingual session the language is decided per piece by the engine itself (Groq's label,
+  or Whisper's own first token on the local engine). A one-word turn or a name can read as either
+  language, and the first provisional pass over a new phrase can guess wrong for a second before
+  the next pass corrects it.
 - No diarisation within a single track: if three people are on the call, they all come out as
   "Interlocutor".
 - Chrome's internal pages (`chrome://`, Web Store) cannot be captured.

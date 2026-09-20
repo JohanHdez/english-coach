@@ -50,6 +50,10 @@ GRATIS DE PRINCIPIO A FIN
 
 Sin cuenta, sin suscripción y sin límite de minutos. Los chips de frases y las notas no necesitan API key ni conexión. La respuesta sugerida y el informe son opcionales y funcionan con una API key gratuita que creas en menos de un minuto, sin tarjeta.
 
+REUNIONES EN DOS IDIOMAS
+
+Si en la llamada hay quien habla inglés y quien habla español, elige «Reunión bilingüe»: cada intervención se transcribe en el idioma en que se dijo, marcada EN o ES, y la traducción al español aparece sólo bajo lo que se dijo en inglés. Las notas y tu perfil se pueden añadir o cambiar sin salir de la conversación.
+
 CÓMO PRACTICAR SIN REUNIONES
 
 ¿No tienes con quién hablar? Abre en una pestaña cualquier IA de voz que converse contigo —por ejemplo Sesame (app.sesame.com), gratis y sin instalación— y practica:
