@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { insertPreview, insertReal, MAX_BYPASS, MAX_PREVIEW_BYPASS } from './queue.js';
+import { insertPreview, insertReal, takeNext, MAX_BYPASS, MAX_PREVIEW_BYPASS } from './queue.js';
 
 const real = (speaker, id, extra = {}) => ({ speaker, id, ...extra });
 const prev = (speaker, id) => ({ speaker, id, preview: true });
@@ -94,4 +94,25 @@ test("order within each voice is never disturbed", () => {
   insertReal(q, real('them', 't1'));
   insertReal(q, real('them', 't2'));
   assert.deepEqual(ids(q), ['t1', 't2', 'm1', 'm2']);
+});
+
+test('takeNext removes and returns the first segment the lane wants, leaving the rest in order', () => {
+  const queue = [
+    { speaker: 'them', preview: true, id: 1 },
+    { speaker: 'me', id: 2 },
+    { speaker: 'them', preview: true, id: 3 },
+    { speaker: 'them', id: 4 },
+  ];
+  const real = takeNext(queue, (s) => !s.preview);
+  assert.equal(real.id, 2);
+  assert.deepEqual(queue.map((s) => s.id), [1, 3, 4]);
+  const preview = takeNext(queue, (s) => s.preview);
+  assert.equal(preview.id, 1);
+  assert.deepEqual(queue.map((s) => s.id), [3, 4]);
+});
+
+test('takeNext returns null when nothing in the queue is for that lane', () => {
+  const queue = [{ speaker: 'them', preview: true, id: 1 }];
+  assert.equal(takeNext(queue, (s) => !s.preview), null);
+  assert.equal(queue.length, 1);
 });

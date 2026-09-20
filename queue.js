@@ -58,3 +58,10 @@ export function insertReal(queue, seg, maxBypass = MAX_BYPASS) {
   }
   queue.push(seg);
 }
+
+// Each lane takes the first segment that is its to transcribe and leaves the
+// others where they are, so two lanes draining the same queue never reorder it.
+export function takeNext(queue, wants) {
+  const i = queue.findIndex(wants);
+  return i < 0 ? null : queue.splice(i, 1)[0];
+}

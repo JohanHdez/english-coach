@@ -6,7 +6,7 @@ import { openCaptureStream } from './capture.js';
 import { askReply, askReport, groqBaseOf, redact, resolveProvider, PROVIDERS, DEFAULT_COACH } from './coach.js';
 import { startLive, liveAvailability } from './live.js';
 import { EMPTY as STITCH_EMPTY, stitch } from './stitch.js';
-import { insertPreview, insertReal } from './queue.js';
+import { insertPreview, insertReal, takeNext } from './queue.js';
 
 // A preview has to cost less than the interval that schedules it, or the lane
 // stops paying for itself: on the WASM fallback a single pass can take seconds,
@@ -33,8 +33,14 @@ const state = {
   // merely not-yet-true during a legitimate first-run download.
   workerFailed: false,
   queue: [],
-  busy: false,
-  busyPreview: false,
+  // One segment in flight per resource. A Whisper pass on the GPU and a request to
+  // Groq do not wait on each other, so on the API engine the archive and the live
+  // line each get their own lane; on the local engine both are the same lane.
+  inFlight: { local: null, api: null },
+  // The startedAt of the last authoritative piece finished per speaker. With two
+  // lanes a preview of that piece can land after its turn did, and it would repaint
+  // the line the turn just cleared.
+  realDone: { them: 0, me: 0 },
   // Per lane. Slowness is really a property of the shared engine, not of a voice,
   // so which lane draws the slow pass is partly luck — and one shared counter
   // meant one voice's bad luck silenced the other's live line too, which is the
@@ -240,9 +246,9 @@ function localTranscribe(audio) {
       // error per id — but the day it also sends something non-terminal for this
       // id (a streamed partial, a per-pass progress note), that message would
       // deregister the listener and the real result would land on nobody: the
-      // promise never settles, `busy` never clears, and the whole queue stops for
-      // the rest of the session. A silent, total stall is too expensive to leave
-      // resting on a message shape nobody has any reason to preserve.
+      // promise never settles, `state.inFlight[lane]` never clears, and that lane
+      // stops for the rest of the session. A silent, total stall is too expensive
+      // to leave resting on a message shape nobody has any reason to preserve.
       if (m.type !== 'result' && m.type !== 'error') return;
       worker.removeEventListener('message', onMsg);
       if (m.type === 'result') resolve(m.text);
@@ -286,9 +292,10 @@ function enqueue(seg) {
 // Previews are invisible work: counting them would flash "Transcribiendo…" in
 // both interfaces every second while the other person is still speaking.
 const pendingCount = () =>
-  state.queue.filter((s) => !s.preview).length + (state.busy && !state.busyPreview ? 1 : 0);
+  state.queue.filter((s) => !s.preview).length
+  + Object.values(state.inFlight).filter((s) => s && !s.preview).length;
 
-const queueIdle = () => !state.busy && state.queue.length === 0;
+const queueIdle = () => state.queue.length === 0 && !state.inFlight.local && !state.inFlight.api;
 
 // The provisional lane, per speaker. Web Speech, while it lives, covers the other
 // speaker's line word by word and strictly better — but it never hears the
@@ -333,16 +340,24 @@ async function waitForQueue(timeoutMs = 120000) {
   return queueIdle();
 }
 
-async function drain() {
-  if (state.busy || state.queue.length === 0) return;
-  const seg = state.queue.shift();
-  state.busy = true;
-  state.busyPreview = !!seg.preview;
+// Which resource transcribes a segment: previews are local on every engine, and
+// authoritative turns go to the network on the API engine.
+const laneOf = (seg) => (!seg.preview && isApiEngine() ? 'api' : 'local');
+
+function drain() {
+  for (const lane of ['local', 'api']) {
+    if (state.inFlight[lane]) continue;
+    const seg = takeNext(state.queue, (s) => laneOf(s) === lane);
+    if (!seg) continue;
+    state.inFlight[lane] = seg;
+    transcribe(seg, lane);
+  }
+}
+
+async function transcribe(seg, lane) {
   const startedAt = Date.now();
   try {
-    const text = (!seg.preview && state.settings.engine === 'api')
-      ? await apiTranscribe(seg.audio)
-      : await localTranscribe(seg.audio);
+    const text = lane === 'api' ? await apiTranscribe(seg.audio) : await localTranscribe(seg.audio);
     const clean = (text || '').trim();
     if (seg.preview) {
       // Consecutive rounds, which is what the constant has always claimed. Counting
@@ -359,8 +374,10 @@ async function drain() {
       // Successive passes are overlapping re-transcriptions of the same speech, not
       // pieces to swap in. Stitched, the line grows and only its tail can change.
       // Not while paused: a pass that was in flight when the pause landed would
-      // otherwise repaint the line pause() just blanked.
-      if (state.running && !state.paused && !isJunk(clean)) {
+      // otherwise repaint the line pause() just blanked. Not for a piece whose turn
+      // already landed: the other lane got there first.
+      if (state.running && !state.paused && !isJunk(clean)
+        && seg.startedAt > state.realDone[seg.speaker]) {
         if (state.pieceStart[seg.speaker] !== seg.startedAt) {
           // First preview of a new piece: start from nothing, or it inherits the
           // previous piece's committed prefix.
@@ -397,13 +414,13 @@ async function drain() {
       // stays frozen on screen until that speaker talks again.
       clearPartial(seg.speaker);
     }
+    if (!seg.preview) state.realDone[seg.speaker] = Math.max(state.realDone[seg.speaker], seg.startedAt);
   } catch (e) {
     // A failed preview stays silent: the real segment reports the same problem
     // a moment later, and one toast per second would bury it.
     if (!seg.preview) status('Error transcribiendo: ' + (e.message || e), 'error');
   } finally {
-    state.busy = false;
-    state.busyPreview = false;
+    state.inFlight[lane] = null;
     broadcast({ type: 'QUEUE', pending: pendingCount() });
     drain();
   }
@@ -447,6 +464,8 @@ async function start(streamId, settings, streamKind) {
   state.settings = settings;
   state.queue = [];
   state.seq = 0;
+  state.inFlight = { local: null, api: null };
+  state.realDone = { them: 0, me: 0 };
   state.previewSlow = { them: 0, me: 0 };
   state.previewOff = { them: false, me: false };
   state.workerFailed = false;
@@ -516,14 +535,18 @@ async function start(streamId, settings, streamKind) {
   // report a working Groq session as stuck loading, or as failed outright if the
   // download never completes.
   if (settings.engine === 'api') status('Escuchando (Groq API)…', 'ok');
-  else status('Cargando modelo local…', 'loading');
-  ensureWorker().postMessage({
-    type: 'init',
-    model: settings.model || 'onnx-community/whisper-base.en',
-    device: settings.device || 'webgpu',
-    base: chrome.runtime.getURL('vendor/'),
-    lang: settings.lang || 'en',
-  });
+  // On the API engine with the live line switched off, nothing downstream ever
+  // reads the model's output, so loading it would only spend the download.
+  if (settings.engine !== 'api' || settings.liveTranscript !== false) {
+    if (settings.engine !== 'api') status('Cargando modelo local…', 'loading');
+    ensureWorker().postMessage({
+      type: 'init',
+      model: settings.model || 'onnx-community/whisper-base.en',
+      device: settings.device || 'webgpu',
+      base: chrome.runtime.getURL('vendor/'),
+      lang: settings.lang || 'en',
+    });
+  }
 
   state.running = true;
   state.paused = false;
