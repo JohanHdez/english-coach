@@ -269,6 +269,7 @@
     }
     .sticky .who { display: block; font-size: 10px; color: #d9a441; margin-bottom: 2px; }
     .sticky .es { display: block; color: #9aa0a6; font-size: 11px; font-style: italic; margin-top: 3px; }
+    .sticky .es.stale { opacity: .6; }
     .turn { font-size: 12px; padding: 5px 8px; border-radius: 8px; background: #24272d; }
     .turn.me { background: #1e3a5f; }
     .turn span { display: block; font-size: 10px; color: #9aa0a6; }
@@ -534,10 +535,11 @@
     const p = document.createElement('div');
     p.textContent = t.text;
     box.append(who, p);
-    if (t.es) {
+    const txt = t.es || t.esStale;
+    if (txt) {
       const es = document.createElement('span');
-      es.className = 'es';
-      es.textContent = t.es;
+      es.className = 'es' + (t.es ? '' : ' stale');
+      es.textContent = txt;
       box.append(es);
     }
   }
@@ -636,8 +638,8 @@
     // A turn re-sent with the same words keeps its translation; one whose words
     // changed is retranslated and shows the old Spanish until the new one lands.
     const prev = isNew ? null : turns[i];
-    if (prev && prev.text === entry.text) entry.es = prev.es;
-    else if (prev && prev.es) entry.esStale = prev.es;
+    if (prev && prev.text === entry.text) { entry.es = prev.es; entry.esStale = prev.esStale; }
+    else if (prev && (prev.es || prev.esStale)) entry.esStale = prev.es || prev.esStale;
     if (isNew) turns.push(entry); else turns[i] = entry;
 
     const box = $('.turns');

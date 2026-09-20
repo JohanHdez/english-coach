@@ -218,6 +218,7 @@ details.field.more[open] > summary { margin-bottom: 4px; }
 }
 .sticky .who { display: block; font-size: 10px; color: #d9a441; margin-bottom: 2px; letter-spacing: .02em; }
 .sticky .es { display: block; color: var(--muted); font-size: 11px; font-style: italic; margin-top: 3px; }
+.sticky .es.stale { opacity: .6; }
 
 /* The default bar paints a pale slab down the panel. Thumb only, in the accent. */
 *::-webkit-scrollbar { width: 10px; height: 10px; }

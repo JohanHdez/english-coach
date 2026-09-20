@@ -89,10 +89,11 @@ function renderSticky() {
   const p = document.createElement('div');
   p.textContent = t.text;
   els.sticky.append(who, p);
-  if (t.es && langOf(t) !== 'es') {
+  const txt = t.es || t.esStale;
+  if (txt && langOf(t) !== 'es') {
     const es = document.createElement('span');
-    es.className = 'es';
-    es.textContent = t.es;
+    es.className = 'es' + (t.es ? '' : ' stale');
+    es.textContent = txt;
     els.sticky.append(es);
   }
 }
@@ -201,8 +202,8 @@ function addEntry(entry) {
   // changed is retranslated, but shows the old Spanish until the new one lands
   // rather than a blank line under text the reader is in the middle of.
   const prev = isNew ? null : entries[i];
-  if (prev && prev.text === entry.text) entry.es = prev.es;
-  else if (prev && prev.es) entry.esStale = prev.es;
+  if (prev && prev.text === entry.text) { entry.es = prev.es; entry.esStale = prev.esStale; }
+  else if (prev && (prev.es || prev.esStale)) entry.esStale = prev.es || prev.esStale;
   if (isNew) entries.push(entry); else entries[i] = entry;
 
   const empty = els.transcript.querySelector('.empty');
