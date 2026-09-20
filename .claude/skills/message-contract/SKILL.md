@@ -55,11 +55,7 @@ overlay / sidepanel / setup ──► background ──► offscreen ──► w
 |---|---|---|
 | `RUNNING` | `running`, `session` (the start timestamp, identifying the conversation) | overlay, sidepanel, and `background` to track session state |
 | `STATUS` | `text`, `kind` (`info`/`ok`/`error`/`loading`), `show?` to force the overlay open | overlay, sidepanel |
-| `SEGMENT` | `entry` (`speaker`, `text`, `t`, `dur`, `lang` — `'en'`/`'es'`, may be absent on an entry recorded before the field existed); a repeated (`speaker`, `t`) is a turn extended by folding — UIs upsert, not append | overlay, sidepanel |
-
-A landing can produce two SEGMENTs in a row: a bubble closed at a finished sentence (its text
-may be shorter than the last one sent under that key) followed by the bubble opened with the
-rest. A bubble whose text did not change is not re-sent.
+| `SEGMENT` | `entry` (`speaker`, `text`, `t`, `dur`, `lang` — `'en'`/`'es'`, may be absent on an entry recorded before the field existed); a repeated (`speaker`, `t`) is a turn extended by folding — UIs upsert, not append. A landing can produce two SEGMENTs in a row: a bubble closed at a finished sentence (its text may be shorter than the last one sent under that key) followed by the bubble opened with the rest. A bubble whose text did not change is not re-sent | overlay, sidepanel |
 | `COACH_CHIPS` | `phrases[]` (`{id, en, es, cat}` — `cat` drives the category filter and comes from `CATALOGUE`; a learner's own phrase gets `CUSTOM_CAT`), `notes[]` (`{id, title, body, open}`) | overlay, sidepanel |
 | `REPLY` | `answer[]` (one item; its key term wrapped in `**`), `ideas[]` (each `{en, es}`), or `pending`, or `error` | overlay, sidepanel |
 | `PAUSED` | `paused` | overlay, sidepanel |

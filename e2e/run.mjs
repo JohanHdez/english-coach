@@ -9,6 +9,7 @@
 //   node e2e/run.mjs english --engine=api --real   # the real Groq: GROQ_API_KEY in the environment
 //   node e2e/run.mjs english --lanes=2     # same audio on both lanes (queue stress)
 //   node e2e/run.mjs monologue30 --lanes=2 --translate   # the other speaker, half a minute, Spanish under the line
+//   node e2e/run.mjs talk30 --lanes=2 --only-them        # the other speaker alone, in sentences: where bubbles close
 //   flags: --headless  --device=wasm  --model=<hf id>  --delay=<mock ms>  --json
 //
 // The first run downloads the Whisper model into e2e/.profile; later runs reuse it.
@@ -57,6 +58,7 @@ const settings = settingsFor({
   lang: flag('lang', 'en'),
   model: flag('model', undefined),
   device: flag('device', 'webgpu'),
+  onlyThem: flag('only-them', false) === true,
 });
 if (mock) settings.groqBase = mock.url;
 if (flag('translate', false) === true) settings.translate = true;

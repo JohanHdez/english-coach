@@ -62,7 +62,7 @@ export function snapshot() {
 // Settings for a run. Defaults match setup.js so a run measures what a fresh install
 // does; a scenario overrides what it needs. Never persisted anywhere but the
 // throwaway profile under e2e/.profile.
-export function settingsFor({ engine = 'local', lanes = 1, lang = 'en', groqKey = '', model, device = 'webgpu', themDeviceId = null } = {}) {
+export function settingsFor({ engine = 'local', lanes = 1, lang = 'en', groqKey = '', model, device = 'webgpu', themDeviceId = null, onlyThem = false } = {}) {
   return {
     engine,
     model: model || (lang === 'es' ? 'onnx-community/whisper-base' : 'onnx-community/whisper-base.en'),
@@ -72,7 +72,10 @@ export function settingsFor({ engine = 'local', lanes = 1, lang = 'en', groqKey 
     lang,
     themSource: lanes === 2 ? 'device' : 'none',
     themDeviceId,
-    captureMic: true,
+    // The fake microphone feeds both lanes the same file, so with two lanes the
+    // learner's copy of every piece lands between the other speaker's and keeps
+    // them from folding — a silent learner in a real meeting does no such thing.
+    captureMic: !(lanes === 2 && onlyThem),
     minSegMs: 900,
     translate: false,
     liveTranscript: true,
@@ -409,7 +412,7 @@ export function analyse({ t0, events }, manifest, { speaker = 'me' } = {}) {
     longestChars: Math.max(0, ...texts.map((t) => t.length)),
     largestRepaintChars: largestRepaint,
     closed: closed.length,
-    closedAtSentenceEnd: closed.filter((t) => /[.!?…]["'"')\]]*$/.test(t.trim())).length,
+    closedAtSentenceEnd: closed.filter((t) => /[.!?…]["'\u201D\u2019)\]]*$/.test(t.trim())).length,
   };
 
   return { rows, bubbles, previews: partials.filter((p) => (p.text || '').trim()).length, maxPending, errors };
