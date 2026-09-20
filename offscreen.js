@@ -485,9 +485,9 @@ async function start(streamId, settings, streamKind) {
   state.liveState = null;
   state.stitch = { them: STITCH_EMPTY, me: STITCH_EMPTY };
   state.pieceStart = { them: 0, me: 0 };
-  const sesion = settings.lang === 'es' ? 'es' : 'en';
-  state.lang = { them: sesion, me: sesion };
-  state.stitchLang = { them: sesion, me: sesion };
+  const sessionLang = settings.lang === 'es' ? 'es' : 'en';
+  state.lang = { them: sessionLang, me: sessionLang };
+  state.stitchLang = { them: sessionLang, me: sessionLang };
   state.segmenters = [];
   state.streams = [];
   // A stopped session is finished: its transcript must not become the opening of
