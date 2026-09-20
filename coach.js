@@ -197,15 +197,20 @@ const clip = (text, max) => {
 
 // Consecutive turns by one speaker in one language read as a single turn: a
 // monologue arrives as several sentence bubbles, and counting each against the
-// limit would push the other speaker's last words out of the window.
-function runsOf(turns) {
+// limit would push the other speaker's last words out of the window. Each
+// turn's text is clipped before it joins the run, never after: the cap bounds
+// one transcription (a Whisper repetition loop lands as a single turn), not a
+// run of sentence bubbles, and clipping the joined run would cut from its
+// start and lose the monologue's newest sentences instead.
+export function runsOf(turns, maxTurnChars = Infinity) {
   const runs = [];
   for (const t of turns) {
+    const text = clip(String(t.text ?? ''), maxTurnChars);
     const last = runs[runs.length - 1];
     if (last && last.speaker === t.speaker && (last.lang || null) === (t.lang || null)) {
-      last.text = `${last.text} ${t.text}`.trim();
+      last.text = `${last.text} ${text}`.trim();
     } else {
-      runs.push({ speaker: t.speaker, lang: t.lang, text: String(t.text ?? '') });
+      runs.push({ speaker: t.speaker, lang: t.lang, text });
     }
   }
   return runs;
@@ -215,11 +220,11 @@ function runsOf(turns) {
 // or the session mixes both ('multi' has no single language to leave unlabelled).
 // An entry with no lang (recorded before the field existed) gets no label either way.
 export function turnsToText(turns, limit = 10, maxChars = Infinity, maxTurnChars = Infinity, sessionLang = 'en') {
-  const lines = runsOf(turns)
+  const lines = runsOf(turns, maxTurnChars)
     .slice(-limit)
     .map((t) => {
       const tag = t.lang && (t.lang !== sessionLang || sessionLang === 'multi') ? ` [${t.lang}]` : '';
-      return `${t.speaker === 'me' ? 'LEARNER' : 'OTHER'}${tag}: ${clip(t.text, maxTurnChars)}`;
+      return `${t.speaker === 'me' ? 'LEARNER' : 'OTHER'}${tag}: ${t.text}`;
     });
   if (maxChars === Infinity) return lines.join('\n');
 
@@ -448,7 +453,9 @@ export async function askReport({ turns, settings }) {
   const texto = turnsToText(turns, 400, REPORT_MAX_CHARS, TURN_MAX_CHARS, settings.lang);
   // A turn can be clipped mid-content by TURN_MAX_CHARS without ever being dropped, so
   // a shrinking line count alone misses it — check the raw turns for one over the cap too.
-  const recortada = texto.split('\n').length < turns.length
+  // Compared against runsOf's count, not turns.length: turnsToText emits one line per
+  // run, and consecutive same-speaker turns collapsing into one run is routine, not a cut.
+  const recortada = texto.split('\n').length < runsOf(turns).length
     || turns.some((t) => String(t.text ?? '').length > TURN_MAX_CHARS);
   return ask({
     provider: settings.reportProvider,

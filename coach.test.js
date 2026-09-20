@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseReply, turnsToText, contextBlock, CONTEXT_MAX_CHARS, askReply, askReport } from './coach.js';
+import { parseReply, turnsToText, runsOf, contextBlock, CONTEXT_MAX_CHARS, askReply, askReport } from './coach.js';
 
 test('parseReply returns one speakable answer and two study ideas, cleaned', () => {
   const raw = JSON.stringify({
@@ -313,4 +313,61 @@ test('turnsToText keeps runs apart across a language change', () => {
     { speaker: 'them', text: 'Perdón, ¿el viernes?', t: 3000, dur: 2, lang: 'es' },
   ];
   assert.equal(turnsToText(turns, 10, Infinity, Infinity, 'multi'), 'OTHER [en]: We can ship on Friday.\nOTHER [es]: Perdón, ¿el viernes?');
+});
+
+test('turnsToText clips each turn before joining a run, never the joined run', () => {
+  // Four bubbles of a monologue, each under the cap alone but well over it joined.
+  // Clipping the run (not each turn) would keep only the opening block.
+  const turns = ['a', 'b', 'c', 'd'].map((c) => ({ speaker: 'them', text: c.repeat(150) }));
+  const text = turnsToText(turns, 10, Infinity, 400);
+  assert.equal(text.split('\n').length, 1);
+  for (const c of ['a', 'b', 'c', 'd']) assert.ok(text.includes(c.repeat(150)), `block '${c}' was dropped`);
+});
+
+test('turnsToText clips an oversized turn from the middle of a run, keeping the newest turn intact', () => {
+  const turns = [
+    { speaker: 'them', text: 'x'.repeat(1000) },
+    { speaker: 'them', text: 'y'.repeat(10) },
+  ];
+  const text = turnsToText(turns, 10, Infinity, 400);
+  assert.equal(text.split('\n').length, 1);
+  assert.ok(text.includes(`${'x'.repeat(400)}…`));
+  assert.ok(text.endsWith('y'.repeat(10)), 'the newest turn in the run was cut off');
+});
+
+test('runsOf counts alternating turns individually', () => {
+  const turns = [
+    { speaker: 'me', text: 'a' },
+    { speaker: 'them', text: 'b' },
+    { speaker: 'me', text: 'c' },
+  ];
+  assert.equal(runsOf(turns).length, 3);
+});
+
+test('runsOf collapses consecutive same-speaker, same-language turns into one run', () => {
+  const turns = [
+    { speaker: 'me', text: 'a' },
+    { speaker: 'them', text: 'b' },
+    { speaker: 'them', text: 'c' },
+    { speaker: 'them', text: 'd' },
+  ];
+  assert.equal(runsOf(turns).length, 2);
+});
+
+test('askReport reports a complete transcript when consecutive same-speaker turns merge into one run', async () => {
+  // Two 'them' turns, ten seconds apart (past MERGE_GAP_MS, never folded by the
+  // segmenter) but still consecutive: turnsToText emits one line for both, which
+  // must not read as a trimmed transcript.
+  const turns = [
+    { speaker: 'me', text: 'How did it go?' },
+    { speaker: 'them', text: 'First half of what they said.' },
+    { speaker: 'them', text: 'Second half, ten seconds later.' },
+  ];
+  const seen = {};
+  const restore = stubGroq(seen, 'Informe de prueba.');
+  try {
+    await askReport({ turns, settings: REPLY_SETTINGS });
+  } finally { restore(); }
+  const user = seen.body.messages.find((m) => m.role === 'user').content;
+  assert.ok(user.includes('Transcripción completa'), 'two consecutive same-speaker turns wrongly marked the transcript as partial');
 });
