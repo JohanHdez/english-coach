@@ -1,7 +1,7 @@
 // Service worker: coordinates the side panel, the in-page overlay and the
 // offscreen document (which does the recording, transcribing and coaching).
 
-import { resolveChips, toggleNoteOpen } from './phrasebook.js';
+import { resolveChips, toggleNoteOpen, addNote } from './phrasebook.js';
 
 const OFFSCREEN_URL = 'offscreen.html';
 
@@ -467,6 +467,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         case 'TOGGLE_NOTE': {
           const { settings = {} } = await chrome.storage.local.get('settings');
           await chrome.storage.local.set({ settings: toggleNoteOpen(settings, msg.id) });
+          sendResponse({ ok: true });
+          break;
+        }
+        // Same shape as TOGGLE_NOTE: only the write happens here.
+        case 'ADD_NOTE': {
+          const { settings = {} } = await chrome.storage.local.get('settings');
+          await chrome.storage.local.set({ settings: addNote(settings, { title: msg.title, body: msg.body }) });
           sendResponse({ ok: true });
           break;
         }

@@ -40,6 +40,7 @@ overlay / sidepanel / setup ──► background ──► offscreen ──► w
 | `STORE_GET` | `keys` | offscreen's only route to `chrome.storage` |
 | `STORE_SET` | `items` | as above |
 | `TOGGLE_NOTE` | `id` | flips a note's `open` in settings; the write re-broadcasts `COACH_CHIPS` |
+| `ADD_NOTE` | `title`, `body` (strings; the service worker clamps them with `addNote`) | adds a note to settings via `addNote`; reply `{ ok }`; the write re-broadcasts `COACH_CHIPS`, so no view re-renders on its own |
 | `PILL_POS` | `pos` (`{right, bottom}` from the corner) | parks the idle pill; the overlay has no storage of its own |
 | `PILL_HIDE` | `host` | adds the sender's hostname to `pillHiddenHosts`. Only the idle pill goes; the card still opens from the icon, the shortcut or the context menu |
 

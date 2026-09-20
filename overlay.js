@@ -177,6 +177,12 @@
       color: #d9a441; font: inherit; font-size: 12.5px; padding: 0;
     }
     .note-body { margin: 6px 0 0; white-space: pre-wrap; font-size: 12px; color: #bdc1c6; line-height: 1.6; }
+    .note-add { margin-top: 8px; }
+    .note-add > summary { cursor: pointer; font-size: 12px; color: #9aa0a6; list-style: none; }
+    .note-add > summary::-webkit-details-marker { display: none; }
+    .note-form { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+    .note-form input, .note-form textarea { width: 100%; box-sizing: border-box; background: #1a1d21; color: #e8eaed; border: 1px solid #2c3038; border-radius: 8px; padding: 6px 8px; font: inherit; font-size: 12px; }
+    .note-save { align-self: flex-start; }
 
     /* Hidden by a class, not :empty — the box always holds its status and group
        skeleton, so :empty never matches and an idle blue strip would show. */
@@ -330,6 +336,14 @@
           </div>
           <div class="pane notes-pane" hidden>
             <div class="note-list"></div>
+            <details class="note-add">
+              <summary>＋ Añadir nota</summary>
+              <form class="note-form">
+                <input class="note-title" type="text" placeholder="Título corto" />
+                <textarea class="note-body-input" rows="3" placeholder="Lo que quieras tener a mano ahora mismo"></textarea>
+                <button class="note-save" type="submit">Guardar nota</button>
+              </form>
+            </details>
           </div>
           <div class="reply">
             <button class="reply-close" title="Cerrar sugerencia">✕</button>
@@ -816,11 +830,10 @@
     // A tab with nothing behind it is a dead end: hide it and, if it was the open
     // one, fall through to the tab that does have something.
     $('.tab-phrases').hidden = !phrases.length;
-    $('.tab-notes').hidden = !notes.length;
+    $('.tab-notes').hidden = false;
     $('.tab-phrases .count').textContent = phrases.length;
     $('.tab-notes .count').textContent = notes.length;
     if (tab === 'phrases' && !phrases.length) tab = 'notes';
-    if (tab === 'notes' && !notes.length) tab = 'phrases';
     $('.tab-phrases').classList.toggle('on', tab === 'phrases');
     $('.tab-notes').classList.toggle('on', tab === 'notes');
     $('.phrases-pane').hidden = tab !== 'phrases';
@@ -888,6 +901,18 @@
 
   $('.tab-phrases').addEventListener('click', () => { tab = 'phrases'; renderCoach(); });
   $('.tab-notes').addEventListener('click', () => { tab = 'notes'; renderCoach(); });
+
+  $('.note-form').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const title = $('.note-title').value;
+    const body = $('.note-body-input').value;
+    if (!title.trim() && !body.trim()) return;
+    // The content script has no chrome.storage: the note goes through the router,
+    // and COACH_CHIPS brings it back to every view.
+    chrome.runtime.sendMessage({ type: 'ADD_NOTE', title, body }).catch(() => {});
+    $('.note-form').reset();
+    $('.note-add').open = false;
+  });
 
   // --- dragging the card ---------------------------------------------------
   let drag = null;
