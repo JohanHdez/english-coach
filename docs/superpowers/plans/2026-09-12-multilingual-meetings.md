@@ -634,8 +634,8 @@ In `offscreen.js`, in the `state` object, after `pieceStart`:
 and in `start`, beside the other per-session resets:
 
 ```js
-  const sesion = settings.lang === 'es' ? 'es' : 'en';
-  state.lang = { them: sesion, me: sesion };
+  const sessionLang = settings.lang === 'es' ? 'es' : 'en';
+  state.lang = { them: sessionLang, me: sessionLang };
 ```
 
 - [ ] **Step 3: Put the language on every partial and every entry**
@@ -703,7 +703,7 @@ and declare the companion field in `state`, beside `pieceStart`:
 resetting it in `start` alongside `state.lang`:
 
 ```js
-  state.stitchLang = { them: sesion, me: sesion };
+  state.stitchLang = { them: sessionLang, me: sessionLang };
 ```
 
 - [ ] **Step 5: Verify**
@@ -1045,7 +1045,9 @@ async function liveLang() {
 }
 ```
 
-and at the top of `checkLive`, before it asks about availability:
+and inside `checkLive`, **after** its existing `const el = $('liveStatus');` and
+`const boton = $('installLive');` lines and **before** `const estado = …` — both names are
+used by the guard, so placing it above their declarations would throw:
 
 ```js
   if ((await sessionLang()) === 'multi') {
@@ -1054,6 +1056,20 @@ and at the top of `checkLive`, before it asks about availability:
     boton.hidden = true;
     return;
   }
+```
+
+- [ ] **Step 3b: The overlay's session-wide translation flag stops encoding the session language**
+
+Task 6 made translation a per-turn decision in both views (`langOf(turn) !== 'es'`), but a freshly injected overlay still learns whether translation is on at all from `UI_SYNC`, and `background.js` computes that as `settings.translate !== false && settings.lang !== 'es'`. In a bilingual session the clause is harmless (`'multi' !== 'es'`), but once a turn can carry a language of its own (Task 9), an English turn in a Spanish-configured session would be translated by the side panel and not by the overlay. One definition of "translation is on": in `background.js`, in the `UI_SYNC` reply, replace
+
+```js
+            translate: settings.translate !== false && settings.lang !== 'es',
+```
+with
+```js
+            // Whether translation is on at all; which turns get one is decided per
+            // turn by the views (a Spanish turn never does), not by the session.
+            translate: settings.translate !== false,
 ```
 
 - [ ] **Step 4: Verify**
@@ -1069,7 +1085,7 @@ In Chrome, after reloading: selecting *Reunión bilingüe* and starting a sessio
 - [ ] **Step 5: Commit**
 
 ```bash
-git add sidepanel.html offscreen.js setup.js
+git add sidepanel.html offscreen.js setup.js background.js
 git commit -m "$(cat <<'EOF'
 feat(session): offer a bilingual meeting
 
@@ -1122,12 +1138,12 @@ async function apiTranscribe(audio) {
   });
   if (!res.ok) throw new Error(`Groq ${res.status}: ${redact(await res.text()).slice(0, 200)}`);
   const data = await res.json();
-  const dicho = typeof data.language === 'string' ? data.language.toLowerCase() : '';
+  const reported = typeof data.language === 'string' ? data.language.toLowerCase() : '';
   // Whisper names languages in English words ("spanish"), not codes.
-  const detectado = /^(es|spa|spanish|castilian|español)$/.test(dicho) ? 'es'
-    : /^(en|eng|english|inglés)$/.test(dicho) ? 'en'
+  const detected = /^(es|spa|spanish|castilian|español)$/.test(reported) ? 'es'
+    : /^(en|eng|english|inglés)$/.test(reported) ? 'en'
     : null;
-  return { text: data.text || '', lang: detectado };
+  return { text: data.text || '', lang: detected };
 }
 ```
 
@@ -1136,10 +1152,10 @@ async function apiTranscribe(audio) {
 In `drain`, replace the transcription call and the `clean` line:
 
 ```js
-    const salida = (!seg.preview && state.settings.engine === 'api')
+    const result = (!seg.preview && state.settings.engine === 'api')
       ? await apiTranscribe(seg.audio)
       : { text: await localTranscribe(seg.audio, state.lang[seg.speaker]), lang: null };
-    const clean = (salida.text || '').trim();
+    const clean = (result.text || '').trim();
 ```
 
 - [ ] **Step 3: Let an authoritative turn set the speaker's language**
@@ -1151,10 +1167,10 @@ called:
       // What the engine detected outranks what langid.js reads off the text, and both
       // outrank the sticky value. This is also what the next preview is decoded with,
       // so the live line follows a speaker's switch within one turn.
-      const leido = detect(clean);
-      const idioma = salida.lang
-        || (leido.confidence >= LANG_CONFIDENCE ? leido.lang : null);
-      if (idioma) state.lang[seg.speaker] = idioma;
+      const read = detect(clean);
+      const turnLang = result.lang
+        || (read.confidence >= LANG_CONFIDENCE ? read.lang : null);
+      if (turnLang) state.lang[seg.speaker] = turnLang;
 ```
 
 The `appendTranscript` call below it already reads `lang: state.lang[seg.speaker]` from
@@ -1246,7 +1262,7 @@ empty buffer and return nothing, silently. In `drain`, immediately after
   // The transcription path transfers this buffer to the worker, so a possible second
   // pass needs its own copy taken before the first one leaves. Only real segments can
   // be re-read, so a preview pays nothing for this.
-  const respaldo = seg.preview ? null : seg.audio.slice();
+  const backup = seg.preview ? null : seg.audio.slice();
 ```
 
 - [ ] **Step 3: Re-transcribe a turn that reads as the other language**
@@ -1257,30 +1273,30 @@ full rule:
 ```js
       // What the engine detected outranks everything; on the local engine there is
       // none, so the text decides.
-      let texto = clean;
-      let idioma = salida.lang;
-      if (!idioma) {
-        const leido = detect(clean);
-        const otro = state.lang[seg.speaker] === 'es' ? 'en' : 'es';
-        if (leido.lang === otro && leido.confidence >= LANG_CONFIDENCE) {
+      let turnText = clean;
+      let turnLang = result.lang;
+      if (!turnLang) {
+        const read = detect(clean);
+        const other = state.lang[seg.speaker] === 'es' ? 'en' : 'es';
+        if (read.lang === other && read.confidence >= LANG_CONFIDENCE) {
           state.langVotes[seg.speaker]++;
           // One pass, never a loop: if the re-read still disagrees, the first text
           // stands. Losing a turn is worse than labelling one wrongly.
           try {
-            const segundo = ((await localTranscribe(respaldo, otro)) || '').trim();
-            if (segundo && !isJunk(segundo)) { texto = segundo; idioma = otro; }
+            const second = ((await localTranscribe(backup, other)) || '').trim();
+            if (second && !isJunk(second)) { turnText = second; turnLang = other; }
           } catch {
             // A failed re-read must not cost the turn: the first pass still stands.
           }
           // Two agreements in a row, and the speaker moves.
-          if (state.langVotes[seg.speaker] >= 2) state.lang[seg.speaker] = otro;
+          if (state.langVotes[seg.speaker] >= 2) state.lang[seg.speaker] = other;
         } else {
           state.langVotes[seg.speaker] = 0;
-          if (leido.lang && leido.confidence >= LANG_CONFIDENCE) idioma = leido.lang;
+          if (read.lang && read.confidence >= LANG_CONFIDENCE) turnLang = read.lang;
         }
       } else {
         state.langVotes[seg.speaker] = 0;
-        state.lang[seg.speaker] = idioma;
+        state.lang[seg.speaker] = turnLang;
       }
 ```
 
@@ -1289,10 +1305,10 @@ and make the stored entry use the pair this produced:
 ```js
       await appendTranscript({
         speaker: seg.speaker,
-        text: texto,
+        text: turnText,
         t: seg.startedAt,
         dur: Math.round(seg.durationMs / 100) / 10,
-        lang: idioma || state.lang[seg.speaker],
+        lang: turnLang || state.lang[seg.speaker],
       });
 ```
 
@@ -1321,6 +1337,1044 @@ someone mid-conversation. The audio is copied before the first pass —
 its buffer is transferred to the worker and would be empty on the second.
 
 Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
+EOF
+)"
+```
+
+---
+
+## Task 11: Two lanes, two resources — the network never waits for the GPU
+
+Measured on 2026-09-19 with the end-to-end harness (`node e2e/run.mjs english --engine=api`, Groq stand-in at 900 ms per request, this Mac's Intel GPU): a preview pass costs about 1 s, and in two of three turns the authoritative segment waited ~0.9 s for the preview in flight before its request even left. The queue is serial — one `busy` flag — although a Whisper pass on the GPU and an HTTP request to Groq are independent resources. On the API engine that coupling is pure loss in both directions: turns wait for previews, and previews (the live line) wait for the network. This task gives each resource its own lane. The local engine keeps one lane, because there the model is the only resource.
+
+A second defect the coupling hid: once the two run concurrently, a preview that was in flight when its turn landed can finish after it and repaint the line the turn just replaced. Each speaker remembers the last authoritative piece, and a preview of that piece or an older one is dropped.
+
+**Files:**
+- Modify: `queue.js` (a `takeNext` helper), `queue.test.js`
+- Modify: `offscreen.js` (`state`, `pendingCount`, `queueIdle`, `drain`, the model init in `start`)
+
+**Interfaces:**
+- Produces: `takeNext(queue, wants)` in `queue.js` — removes and returns the first segment `wants` accepts, or `null`. `state.inFlight = { local, api }`, the segment each lane is working on. `state.realDone = { them, me }`, the `startedAt` of the last authoritative segment finished per speaker.
+- Consumes: `insertPreview` / `insertReal` unchanged — ordering policy stays in `queue.js`; this task only changes who takes from the queue.
+
+- [ ] **Step 1: Write the failing tests**
+
+Append to `queue.test.js`:
+
+```js
+import { takeNext } from './queue.js';
+
+test('takeNext removes and returns the first segment the lane wants, leaving the rest in order', () => {
+  const queue = [
+    { speaker: 'them', preview: true, id: 1 },
+    { speaker: 'me', id: 2 },
+    { speaker: 'them', preview: true, id: 3 },
+    { speaker: 'them', id: 4 },
+  ];
+  const real = takeNext(queue, (s) => !s.preview);
+  assert.equal(real.id, 2);
+  assert.deepEqual(queue.map((s) => s.id), [1, 3, 4]);
+  const preview = takeNext(queue, (s) => s.preview);
+  assert.equal(preview.id, 1);
+  assert.deepEqual(queue.map((s) => s.id), [3, 4]);
+});
+
+test('takeNext returns null when nothing in the queue is for that lane', () => {
+  const queue = [{ speaker: 'them', preview: true, id: 1 }];
+  assert.equal(takeNext(queue, (s) => !s.preview), null);
+  assert.equal(queue.length, 1);
+});
+```
+
+(`queue.test.js` already imports `test` and `assert`; merge the `takeNext` import into its existing `./queue.js` import line.)
+
+- [ ] **Step 2: Run the tests to verify they fail**
+
+Run: `node --test queue.test.js`
+Expected: FAIL — `takeNext` is not exported.
+
+- [ ] **Step 3: The helper**
+
+Append to `queue.js`:
+
+```js
+// Each lane takes the first segment that is its to transcribe and leaves the
+// others where they are, so two lanes draining the same queue never reorder it.
+export function takeNext(queue, wants) {
+  const i = queue.findIndex(wants);
+  return i < 0 ? null : queue.splice(i, 1)[0];
+}
+```
+
+- [ ] **Step 4: Run the tests to verify they pass**
+
+Run: `node --test queue.test.js`
+Expected: PASS (13 tests).
+
+- [ ] **Step 5: Two lanes in the offscreen document**
+
+In `offscreen.js`, import the helper:
+
+```js
+import { insertPreview, insertReal, takeNext } from './queue.js';
+```
+
+In `state`, replace `busy: false,` and `busyPreview: false,` with:
+
+```js
+  // One segment in flight per resource. A Whisper pass on the GPU and a request to
+  // Groq do not wait on each other, so on the API engine the archive and the live
+  // line each get their own lane; on the local engine both are the same lane.
+  inFlight: { local: null, api: null },
+  // The startedAt of the last authoritative piece finished per speaker. With two
+  // lanes a preview of that piece can land after its turn did, and it would repaint
+  // the line the turn just cleared.
+  realDone: { them: 0, me: 0 },
+```
+
+Reset both in `start()` beside the other per-session resets:
+
+```js
+  state.inFlight = { local: null, api: null };
+  state.realDone = { them: 0, me: 0 };
+```
+
+Replace `pendingCount`, `queueIdle` and `drain` (the whole function, from `async function drain()` to its closing brace) with:
+
+```js
+// Previews are invisible work: counting them would flash "Transcribiendo…" in
+// both interfaces every second while the other person is still speaking.
+const pendingCount = () =>
+  state.queue.filter((s) => !s.preview).length
+  + Object.values(state.inFlight).filter((s) => s && !s.preview).length;
+
+const queueIdle = () => state.queue.length === 0 && !state.inFlight.local && !state.inFlight.api;
+
+// Which resource transcribes a segment: previews are local on every engine, and
+// authoritative turns go to the network on the API engine.
+const laneOf = (seg) => (!seg.preview && (state.settings || {}).engine === 'api' ? 'api' : 'local');
+
+function drain() {
+  for (const lane of ['local', 'api']) {
+    if (state.inFlight[lane]) continue;
+    const seg = takeNext(state.queue, (s) => laneOf(s) === lane);
+    if (!seg) continue;
+    state.inFlight[lane] = seg;
+    transcribe(seg, lane);
+  }
+}
+
+async function transcribe(seg, lane) {
+  const startedAt = Date.now();
+  try {
+    const text = lane === 'api' ? await apiTranscribe(seg.audio) : await localTranscribe(seg.audio);
+    const clean = (text || '').trim();
+    if (seg.preview) {
+      // Consecutive rounds, which is what the constant has always claimed. Counting
+      // cumulatively meant two slow passes twenty minutes apart retired the lane.
+      if (Date.now() - startedAt > PREVIEW_MAX_MS) {
+        if (++state.previewSlow[seg.speaker] >= PREVIEW_SLOW_ROUNDS) {
+          state.previewOff[seg.speaker] = true;
+          if (!anyLiveLaneLeft()) broadcast({ type: 'LIVE_STATE', state: 'slow', fallback: false });
+        }
+      } else {
+        state.previewSlow[seg.speaker] = 0;
+      }
+      // Provisional only: displayed, never stored, never given to the coach.
+      // Successive passes are overlapping re-transcriptions of the same speech, not
+      // pieces to swap in. Stitched, the line grows and only its tail can change.
+      // Not while paused: a pass that was in flight when the pause landed would
+      // otherwise repaint the line pause() just blanked. Not for a piece whose turn
+      // already landed: the other lane got there first.
+      if (state.running && !state.paused && !isJunk(clean)
+        && seg.startedAt > state.realDone[seg.speaker]) {
+        if (state.pieceStart[seg.speaker] !== seg.startedAt) {
+          // First preview of a new piece: start from nothing, or it inherits the
+          // previous piece's committed prefix.
+          state.stitch[seg.speaker] = STITCH_EMPTY;
+          state.pieceStart[seg.speaker] = seg.startedAt;
+        }
+        const out = stitch(state.stitch[seg.speaker], clean);
+        state.stitch[seg.speaker] = out.state;
+        broadcast({
+          type: 'PARTIAL',
+          speaker: seg.speaker,
+          text: `${out.committed} ${out.tail}`.trim(),
+          committed: out.committed,
+        });
+      }
+    } else if (!isJunk(clean)) {
+      if (seg.speaker === 'them' && state.live && !state.liveHeard) {
+        state.liveSilentMs += seg.durationMs || 0;
+        if (state.liveSilentMs >= LIVE_PROOF_MS) retireSilentLiveLayer();
+      }
+      await appendTranscript({
+        speaker: seg.speaker,
+        text: clean,
+        t: seg.startedAt,
+        dur: Math.round(seg.durationMs / 100) / 10,
+      });
+      // An open cut means the speaker never paused: their line stays on screen and
+      // the next piece's preview replaces it. Web Speech is the exception — its
+      // accumulated results now live in the bubble, and without a reset the line
+      // would repeat them and keep growing for the rest of the monologue.
+      if (!seg.open || (seg.speaker === 'them' && state.live)) clearPartial(seg.speaker);
+    } else if (!seg.open) {
+      // A discarded closing turn also clears the provisional line: otherwise it
+      // stays frozen on screen until that speaker talks again.
+      clearPartial(seg.speaker);
+    }
+    if (!seg.preview) state.realDone[seg.speaker] = Math.max(state.realDone[seg.speaker], seg.startedAt);
+  } catch (e) {
+    // A failed preview stays silent: the real segment reports the same problem
+    // a moment later, and one toast per second would bury it.
+    if (!seg.preview) status('Error transcribiendo: ' + (e.message || e), 'error');
+  } finally {
+    state.inFlight[lane] = null;
+    broadcast({ type: 'QUEUE', pending: pendingCount() });
+    drain();
+  }
+}
+```
+
+If Task 4's fix round or Tasks 5–10 have already changed lines inside this function (the `lang` field on `PARTIAL` and on the stored entry, `localTranscribe(seg.audio, state.lang[seg.speaker])`, the detection block before `appendTranscript`), keep those changes: this task moves the body into `transcribe(seg, lane)` and adds the `realDone` guard and assignment; it does not undo anything the other tasks put there. State so in the report.
+
+- [ ] **Step 6: The live line is the only reason the API engine loads a model**
+
+In `start()`, the model init block runs on both engines since Task 4. Wrap it so the API engine skips the download when the live line is switched off — that setting is the one way a learner says they do not want the lane, and the model would only ever draw it:
+
+```js
+  if (settings.engine !== 'api' || settings.liveTranscript !== false) {
+    // …the existing status(...) and ensureWorker().postMessage({ type: 'init', … }) block, unchanged…
+  }
+```
+
+Keep whatever `ok` status Task 4's fix round emits for the API engine outside that guard, so a Groq session without a live line still reports that it is listening.
+
+- [ ] **Step 7: Verify**
+
+```bash
+node .claude/skills/preflight/scripts/preflight.mjs
+node --test *.test.js
+```
+Expected: 0 failing; the one `langid.js` dead-code warning if Task 9 has not landed yet, otherwise 0 warnings; 0 fail.
+
+End to end (the controller runs these; the implementer does not launch Chrome):
+`node e2e/run.mjs english --engine=api` — every turn's "bubble after end" within ~0.3 s of the stand-in's delay (900 ms) plus the closing silence, none of them waiting a full preview pass; `node e2e/run.mjs english --engine=api --delay=3000` — the live line for the next sentence keeps appearing while a request is in flight; `node e2e/run.mjs english` — the local engine unchanged.
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add queue.js queue.test.js offscreen.js
+git commit -m "$(cat <<'EOF'
+perf(offscreen): give the network its own lane
+
+A Whisper pass on the GPU and a request to Groq are independent
+resources, but one serial queue made each wait for the other: measured
+end to end, a turn on the API engine waited a full preview pass before
+its request left, and the live line stalled while the request was out.
+Each lane now drains on its own, and a preview that outlives its turn is
+dropped instead of repainting the line the turn just replaced.
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
+EOF
+)"
+```
+
+---
+
+## Task 12: A monologue reaches its bubble in eight seconds, not eighteen
+
+`MAX_SEG_MS` is 18 s. A speaker who never dips below `SOFT_SILENCE_MS` for that long — a fast reader, a noisy line — produces one 18 s segment that only starts transcribing when it ends. `foldIntoTranscript` merges consecutive pieces of one speaker into one bubble, so the cut has no visible cost: the bubble grows in pieces instead of arriving whole and late.
+
+**Files:**
+- Modify: `segmenter.js` (`MAX_SEG_MS`), `segmenter.test.js`
+
+- [ ] **Step 1: Write the failing test**
+
+Append to `segmenter.test.js`, using its existing `run(pattern)` helper (ambient noise first, then `[amplitude, blocks]` pairs, a closing `flush()` at the end — so the last piece is the closed one):
+
+```js
+test('a speaker who never dips streams out in pieces of at most eight seconds', () => {
+  const segs = run([[VOICE, 200]]);   // 20 s without a single breath dip
+  assert.ok(segs.length >= 3, `expected forced cuts every eight seconds, got ${segs.length} pieces`);
+  for (const s of segs) assert.ok(s.durationMs <= 8000, `a piece lasted ${s.durationMs} ms`);
+  for (const s of segs.slice(0, -1)) assert.ok(s.open, 'a forced cut is an open cut');
+});
+```
+
+- [ ] **Step 2: Run the test to verify it fails**
+
+Run: `node --test segmenter.test.js`
+Expected: FAIL — two pieces (18 s and 2 s), the first far over 8 000 ms.
+
+- [ ] **Step 3: Lower the ceiling**
+
+In `segmenter.js`:
+
+```js
+// Forced cut. A speaker who never dips below SOFT_SILENCE_MS would otherwise hold
+// one segment for this long and see nothing of it until it ends. Pieces fold into
+// one bubble downstream (foldIntoTranscript), so a shorter ceiling costs nothing on
+// screen — it only bounds how late the first words of a monologue can be.
+export const MAX_SEG_MS = 8000;
+```
+
+- [ ] **Step 4: Run the tests to verify they pass, then the full gate**
+
+```bash
+node --test segmenter.test.js
+node .claude/skills/preflight/scripts/preflight.mjs
+node --test *.test.js
+```
+Expected: PASS; 0 failing; 0 fail. Check the existing segmenter tests: any that assumed an 18 s ceiling must be updated to the value's meaning, not deleted.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add segmenter.js segmenter.test.js
+git commit -m "$(cat <<'EOF'
+perf(segmenter): cut a monologue every eight seconds at most
+
+Eighteen seconds without a breath dip meant eighteen seconds without a
+bubble. Pieces fold into one turn downstream, so the shorter ceiling
+changes nothing on screen except how soon the first words land.
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
+EOF
+)"
+```
+
+---
+
+## Task 13: Add a note or update the profile without leaving the conversation
+
+The user's request of 2026-09-19: notes and the personal profile "can change at any moment", so they must be addable during a session, not only in Options. "Contexto de hoy" already is: the side panel keeps its textarea enabled mid-session and the offscreen document re-reads settings on every coach call, so an edit reaches the next suggested reply with no protocol change. This task gives notes and the profile the same path in the side panel (and the floating window, which is the same page). The page overlay is Task 14.
+
+**Files:**
+- Modify: `phrasebook.js` (`addNote`), `phrasebook.test.js`
+- Modify: `sidepanel.html`, `sidepanel.css`, `sidepanel.js`
+
+**Interfaces:**
+- Produces: `addNote(settings, { title, body })` in `phrasebook.js` — pure; returns the same object untouched when the note is empty or the cap is reached, otherwise a new settings object with the note appended, opened, and every other note closed. Task 14's `ADD_NOTE` handler reuses it.
+- Consumes: `NOTE_TITLE_MAX`, `NOTE_BODY_MAX`, `MAX_NOTES`, `clamp` (all in `phrasebook.js`); `PROFILE_MAX_CHARS` from `coach.js`; `storage.onChanged` in `background.js`, which already re-broadcasts `COACH_CHIPS` when `settings.notes` changes.
+
+- [ ] **Step 1: Write the failing tests**
+
+Append to `phrasebook.test.js` (add `addNote`, `MAX_NOTES`, `NOTE_TITLE_MAX`, `NOTE_BODY_MAX` to its existing `./phrasebook.js` import if they are not there yet):
+
+```js
+test('addNote appends an open note and closes the others', () => {
+  const before = { notes: [{ id: 'n.1', title: 'Daily', body: 'x', open: true }] };
+  const after = addNote(before, { title: 'Salary', body: 'Ask about the band.' });
+  assert.equal(after.notes.length, 2);
+  assert.equal(after.notes[0].open, false);
+  assert.deepEqual({ title: after.notes[1].title, body: after.notes[1].body, open: after.notes[1].open },
+    { title: 'Salary', body: 'Ask about the band.', open: true });
+  assert.ok(after.notes[1].id.startsWith('n.'));
+  assert.notEqual(after, before);
+  assert.equal(before.notes.length, 1, 'the input is not mutated');
+});
+
+test('addNote ignores an empty note and returns the same settings object', () => {
+  const before = { notes: [] };
+  assert.equal(addNote(before, { title: '   ', body: '' }), before);
+});
+
+test('addNote respects the cap and clamps the lengths', () => {
+  const full = { notes: Array.from({ length: MAX_NOTES }, (_, i) => ({ id: `n.${i}`, title: 't', body: 'b', open: false })) };
+  assert.equal(addNote(full, { title: 'one more', body: '' }), full);
+  const long = addNote({ notes: [] }, { title: 'x'.repeat(NOTE_TITLE_MAX + 5), body: 'y'.repeat(NOTE_BODY_MAX + 5) });
+  assert.equal(long.notes[0].title.length, NOTE_TITLE_MAX);
+  assert.equal(long.notes[0].body.length, NOTE_BODY_MAX);
+});
+```
+
+- [ ] **Step 2: Run the tests to verify they fail**
+
+Run: `node --test phrasebook.test.js`
+Expected: FAIL — `addNote` is not exported.
+
+- [ ] **Step 3: The helper**
+
+In `phrasebook.js`, after `toggleNoteOpen`:
+
+```js
+// Adding a note mid-conversation is a settings write like toggling one, from the
+// same two contexts, so it lives here for the same reason. The new note opens and
+// the others close: a note written while someone waits is wanted on screen now,
+// and one open note at a time is the rule toggleNoteOpen already keeps.
+export function addNote(settings = {}, { title, body } = {}) {
+  const notes = Array.isArray(settings.notes) ? settings.notes : [];
+  const t = clamp(title, NOTE_TITLE_MAX);
+  const b = clamp(body, NOTE_BODY_MAX);
+  if (!t && !b) return settings;
+  if (notes.length >= MAX_NOTES) return settings;
+  const note = { id: 'n.' + Date.now(), title: t, body: b, open: true };
+  return { ...settings, notes: [...notes.map((n) => (n ? { ...n, open: false } : n)), note] };
+}
+```
+
+- [ ] **Step 4: Run the tests to verify they pass**
+
+Run: `node --test phrasebook.test.js`
+Expected: PASS.
+
+- [ ] **Step 5: The side panel — a note form behind the Notas tab, a profile field under the context**
+
+In `sidepanel.html`, inside `<div id="notesPane" class="pane" hidden>` after `<div id="notes" class="note-list"></div>`:
+
+```html
+        <details id="noteAdd" class="note-add">
+          <summary>＋ Añadir nota</summary>
+          <form id="noteForm" class="note-form">
+            <input id="noteTitle" type="text" placeholder="Título corto" />
+            <textarea id="noteBody" rows="3" placeholder="Lo que quieras tener a mano ahora mismo"></textarea>
+            <button id="noteSave" class="small primary" type="submit">Guardar nota</button>
+          </form>
+        </details>
+```
+
+and in the controls section, right after the `sessionContext` field:
+
+```html
+      <details class="field more" id="profileMore">
+        <summary>Mi perfil <span class="hint">· lo que el coach sabe de ti</span></summary>
+        <textarea id="profile" rows="3" placeholder="8 años con Angular. Migré la plataforma de pagos…"></textarea>
+      </details>
+```
+
+In `sidepanel.css`, after the `.note-body` rule:
+
+```css
+/* Adding a note mid-conversation: folded until wanted, so the list keeps its room. */
+.note-add { margin-top: 8px; }
+.note-add > summary { cursor: pointer; font-size: 12px; color: var(--muted); list-style: none; }
+.note-add > summary::-webkit-details-marker { display: none; }
+.note-form { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+.note-form input, .note-form textarea { width: 100%; box-sizing: border-box; }
+details.field.more > summary { cursor: pointer; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; list-style: none; }
+details.field.more > summary::-webkit-details-marker { display: none; }
+details.field.more[open] > summary { margin-bottom: 4px; }
+```
+
+In `sidepanel.js`:
+
+1. Imports: add `PROFILE_MAX_CHARS` to the `./coach.js` import and `addNote, NOTE_TITLE_MAX, NOTE_BODY_MAX` to the `./phrasebook.js` import that brings `resolveChips, toggleNoteOpen`.
+2. `els`: add `profile: $('profile'), noteAdd: $('noteAdd'), noteForm: $('noteForm'), noteTitle: $('noteTitle'), noteBody: $('noteBody'),`.
+3. Right after the `els` declaration, the limits the HTML cannot import:
+
+```js
+els.noteTitle.maxLength = NOTE_TITLE_MAX;
+els.noteBody.maxLength = NOTE_BODY_MAX;
+els.profile.maxLength = PROFILE_MAX_CHARS;
+```
+
+4. In `renderCoach`, the Notas tab is no longer a dead end when empty — there is a form behind it. Replace
+
+```js
+  els.tabNotes.hidden = !notes.length;
+```
+with
+```js
+  els.tabNotes.hidden = false;
+```
+and delete the line `if (tab === 'notes' && !notes.length) tab = 'phrases';` (keep the phrases→notes fall-through above it). Leave `syncCoach` as it is: the coach card still needs a lane or a running session to show at all.
+
+5. `saveUi`: add `profile: els.profile.value.trim().slice(0, PROFILE_MAX_CHARS),` beside `sessionContext`. In `init()`, after `els.sessionContext.value = …`, add `els.profile.value = settings.profile || '';`.
+6. Events, beside the `sessionContext` listener (same reason it stays enabled mid-session):
+
+```js
+els.profile.addEventListener('change', saveUi);
+
+els.noteForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const { settings: stored = {} } = await chrome.storage.local.get('settings');
+  const next = addNote(stored, { title: els.noteTitle.value, body: els.noteBody.value });
+  if (next === stored) return;
+  await chrome.storage.local.set({ settings: next });
+  els.noteForm.reset();
+  els.noteAdd.open = false;
+  // No re-render here: the write trips storage.onChanged in background.js, which
+  // re-broadcasts COACH_CHIPS to every view, this one included.
+});
+```
+
+- [ ] **Step 6: Verify**
+
+```bash
+node .claude/skills/preflight/scripts/preflight.mjs
+node --test *.test.js
+```
+Expected: 0 failing (the `langid.js` warning only if Task 9 has not landed); 0 fail.
+
+End to end (controller): with a session running, submit the form from the side panel page and expect a `COACH_CHIPS` broadcast whose `notes` carries the new note, open, and the older ones closed; set the profile field and expect `settings.profile` in storage to change without the session stopping.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add phrasebook.js phrasebook.test.js sidepanel.html sidepanel.css sidepanel.js
+git commit -m "$(cat <<'EOF'
+feat(sidepanel): add a note or edit the profile mid-conversation
+
+Notes and the profile change while the conversation happens — an
+interviewer names a topic, a fact comes back — and Options is the wrong
+place to be while someone waits. Both now save from the side panel the
+way the context already did; the offscreen document re-reads settings on
+every coach call, so the next suggested reply sees them.
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
+EOF
+)"
+```
+
+---
+
+## Task 14: The same note form in the page overlay
+
+The overlay is where the learner looks during a Meet call. It is a content script with no `chrome.storage`, so the note travels through the service worker, the way `TOGGLE_NOTE` does.
+
+**Files:**
+- Modify: `.claude/skills/message-contract/SKILL.md` — **first**
+- Modify: `background.js` (`ADD_NOTE`), `overlay.js` (markup, CSS block, handler)
+
+**Interfaces:**
+- Produces: `ADD_NOTE` (overlay → background): `{ title, body }`; reply `{ ok }`. The write trips `storage.onChanged`, which re-broadcasts `COACH_CHIPS`; the overlay does not re-render itself.
+- Consumes: `addNote` from Task 13.
+
+- [ ] **Step 1: Document the message first**
+
+In `.claude/skills/message-contract/SKILL.md`, beside the `TOGGLE_NOTE` row, add `ADD_NOTE`: sent by `overlay.js` to `background`, payload `title` and `body` (strings; the service worker clamps them with `addNote`), reply `{ ok }`; the storage write re-broadcasts `COACH_CHIPS`, so no view re-renders on its own.
+
+- [ ] **Step 2: The handler**
+
+In `background.js`, import `addNote` beside `resolveChips, toggleNoteOpen`, and after the `TOGGLE_NOTE` case:
+
+```js
+        // Same shape as TOGGLE_NOTE: only the write happens here.
+        case 'ADD_NOTE': {
+          const { settings = {} } = await chrome.storage.local.get('settings');
+          await chrome.storage.local.set({ settings: addNote(settings, { title: msg.title, body: msg.body }) });
+          sendResponse({ ok: true });
+          break;
+        }
+```
+
+- [ ] **Step 3: The overlay**
+
+In `overlay.js`, in the static card markup, replace
+
+```html
+          <div class="pane notes-pane" hidden>
+            <div class="note-list"></div>
+          </div>
+```
+with
+```html
+          <div class="pane notes-pane" hidden>
+            <div class="note-list"></div>
+            <details class="note-add">
+              <summary>＋ Añadir nota</summary>
+              <form class="note-form">
+                <input class="note-title" type="text" placeholder="Título corto" />
+                <textarea class="note-body-input" rows="3" placeholder="Lo que quieras tener a mano ahora mismo"></textarea>
+                <button class="note-save" type="submit">Guardar nota</button>
+              </form>
+            </details>
+          </div>
+```
+
+In its CSS block, after the `.note-body` rule:
+
+```css
+    .note-add { margin-top: 8px; }
+    .note-add > summary { cursor: pointer; font-size: 12px; color: #9aa0a6; list-style: none; }
+    .note-add > summary::-webkit-details-marker { display: none; }
+    .note-form { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+    .note-form input, .note-form textarea { width: 100%; box-sizing: border-box; background: #1a1d21; color: #e8eaed; border: 1px solid #2c3038; border-radius: 8px; padding: 6px 8px; font: inherit; font-size: 12px; }
+    .note-save { align-self: flex-start; }
+```
+
+In `renderCoach`, the Notas tab is no longer hidden when there are no notes (there is a form behind it): replace `$('.tab-notes').hidden = !notes.length;` with `$('.tab-notes').hidden = false;` and delete the line `if (tab === 'notes' && !notes.length) tab = 'phrases';`. Leave `syncCoach` alone.
+
+Beside the tab click handlers:
+
+```js
+  $('.note-form').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const title = $('.note-title').value;
+    const body = $('.note-body-input').value;
+    if (!title.trim() && !body.trim()) return;
+    // The content script has no chrome.storage: the note goes through the router,
+    // and COACH_CHIPS brings it back to every view.
+    chrome.runtime.sendMessage({ type: 'ADD_NOTE', title, body }).catch(() => {});
+    $('.note-form').reset();
+    $('.note-add').open = false;
+  });
+```
+
+The overlay's `$` helper resolves inside the shadow root, as every other selector in the file does; use it, not `document`.
+
+- [ ] **Step 4: Verify**
+
+```bash
+node .claude/skills/preflight/scripts/preflight.mjs
+node --test *.test.js
+```
+Expected: 0 failing (preflight checks `ADD_NOTE` is both sent and handled); 0 fail.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add .claude/skills/message-contract/SKILL.md background.js overlay.js
+git commit -m "$(cat <<'EOF'
+feat(overlay): add a note from the page during the call
+
+The overlay is what the learner watches in a meeting, and it has no
+storage of its own, so the note goes through the service worker the way
+a toggle does and comes back to every view as COACH_CHIPS.
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
+EOF
+)"
+```
+
+---
+
+## Task 15: The words after a forced cut are never thrown away
+
+Found by Task 12's review and reproduced against the real `Segmenter`: a forced cut at `MAX_SEG_MS` closes a piece and the phrase continues into a new one. If the speaker stops within the next 100–400 ms, the remainder has fewer than `MIN_VOICED` voiced blocks, and `flush()` discards it as a lone noise blip — the last words of the sentence never reach a transcript. That rule exists for stray sounds between phrases, not for the tail of a phrase the segmenter itself cut in two. At 18 s the window was rare; at 8 s it is routine.
+
+**Files:**
+- Modify: `segmenter.js` (`flush`), `segmenter.test.js`
+
+**Interfaces:**
+- Produces: a piece that continues a cut phrase is emitted whenever it holds any voiced block at all, regardless of `minSegMs` and `minVoiced`. Pieces that begin at a real onset keep both rules.
+
+- [ ] **Step 1: Write the failing test**
+
+Append to `segmenter.test.js` (it has `run(pattern)`, `VOICE`, `QUIET`, `CHUNK_MS`, `MAX_SEG_MS`, `MIN_VOICED`, `PREROLL`):
+
+```js
+test('the words after a forced cut are emitted, however few', () => {
+  // Enough voice for exactly one forced cut, then MIN_VOICED - 1 more blocks of
+  // speech before a real pause: the tail is short, but it is the end of a phrase
+  // the segmenter itself cut, not a stray sound.
+  const blocks = MAX_SEG_MS / CHUNK_MS - PREROLL + (MIN_VOICED - 1);
+  const segs = run([[VOICE, blocks], [QUIET, 12]]);
+  assert.equal(segs.length, 2, `expected the cut piece and its tail, got ${segs.length}`);
+  assert.equal(segs[0].open, true);
+  assert.equal(segs[1].open, false);
+  assert.ok(segs[1].durationMs > 0);
+});
+
+test('a lone blip between phrases is still discarded', () => {
+  const segs = run([[VOICE, MIN_VOICED - 1], [QUIET, 12]]);
+  assert.equal(segs.length, 0);
+});
+```
+
+- [ ] **Step 2: Run the tests to verify they fail**
+
+Run: `node --test segmenter.test.js`
+Expected: the first new test FAILS (one piece — the tail was discarded); the second passes already and pins the rule that must survive.
+
+- [ ] **Step 3: Remember that a piece continues a cut phrase**
+
+In `segmenter.js`, in the constructor beside `this.active = false;`:
+
+```js
+    // Whether the current piece continues a phrase a cut split, rather than
+    // starting at a real onset. The minimum-length rules exist for stray sounds
+    // between phrases; the tail of a phrase the segmenter itself cut is speech.
+    this.continued = false;
+```
+
+In `push`, where a phrase starts (`this.active = true;`), add `this.continued = false;`.
+
+In `flush`, capture the flag with the other locals and set it on the way out:
+
+```js
+    const voiced = this.voicedCount;
+    const continued = this.continued;
+    this.chunks = [];
+    this.voicedCount = 0;
+    this.lastPreviewAt = null;
+    if (keepActive) {
+      this.startedAt = this.now();
+      this.continued = true;
+    } else {
+      this.active = false;
+      this.pre = [];
+      this.silence = 0;
+      this.continued = false;
+    }
+
+    if (continued ? voiced === 0 : (durationMs < this.minSegMs || voiced < this.minVoiced)) return;
+```
+
+(the two existing comments inside `flush` stay where they are; only the lines shown change).
+
+- [ ] **Step 4: Run the tests to verify they pass, then the full gate**
+
+```bash
+node --test segmenter.test.js
+node .claude/skills/preflight/scripts/preflight.mjs
+node --test *.test.js
+```
+Expected: PASS; 0 failing; 0 fail.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add segmenter.js segmenter.test.js
+git commit -m "$(cat <<'EOF'
+fix(segmenter): keep the words after a forced cut
+
+The minimum-length rules drop stray sounds between phrases. The tail of
+a phrase the segmenter itself cut in two is not a stray sound, and at an
+eight-second ceiling a speaker stops inside that window often enough
+that the last words of a sentence were vanishing without a trace.
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
+EOF
+)"
+```
+
+---
+
+## Task 16: The model names the language itself — on every local pass
+
+Task 10's premise was measured false on 2026-09-19 (`node e2e/run.mjs bilingual --lang=multi`, local engine, whisper-base multilingual): forced to English, Whisper does not produce text `langid.js` can flag — it produces a fluent English *translation* of the Spanish sentence ("Of course, with pleasure, we migrate the platform of pay…"), so the text reads as English, no re-pass fires, and every Spanish turn lands labelled `en`. The live line has the same problem one turn earlier.
+
+Whisper detects language natively: the first token it emits after `<|startoftranscript|>` is the language token. The vendored transformers.js does not expose that through the pipeline (with no `language` it warns and forces English), but its `generate()` takes `decoder_input_ids` and honours a precomputed `encoder_outputs`, so one encoder pass can serve both the one-step detection and the transcription. Detection therefore costs one decoder step, and it can run on **every** local pass in a bilingual session — previews included — so the live line is decoded in the right language from its first paint, with no per-speaker lag. The API engine keeps Groq's own label for turns (Task 9); its previews are local and detect the same way.
+
+This task replaces Task 10's re-pass and vote logic, and gates the `langid.js` text fallback on bilingual sessions (Task 9's review: in a pinned session there is no question to answer, and a one-word turn scores 1.0).
+
+**Files:**
+- Modify: `worker.js` (`transcribe` handler; a `detectAndTranscribe` path), `worker.test.js` (the pure helper's tests)
+- Modify: `offscreen.js` (`localTranscribe`, `transcribe`, `state`, `start`)
+
+**Interfaces:**
+- Produces: worker `transcribe` message accepts `detect: true`; the `result` message carries `lang` (`'en'` | `'es'` | `null`). `localTranscribe(audio, lang, detect)` resolves `{ text, lang }`. Pure helper `langFromToken(lang_to_id, tokenId)` in `worker.js` → `'en'`, `'es'`, or `null` for any other language (English and Spanish are the only languages in scope; another token means "no evidence", not a third language).
+- Consumes: `transcriber.model`, `.processor`, `.tokenizer` (the pipeline object exposes all three); `model.generation_config` (`decoder_start_token_id`, `lang_to_id`, `is_multilingual`); `model._prepare_encoder_decoder_kwargs_for_generation(...)` (vendored, fixed version — its return is the model inputs plus `encoder_outputs`).
+
+- [ ] **Step 1: Write the failing tests**
+
+Append to `worker.test.js` (add `langFromToken` to its `./worker.js` import):
+
+```js
+test('langFromToken maps the two languages in scope and nothing else', () => {
+  const lang_to_id = { '<|en|>': 50259, '<|es|>': 50262, '<|fr|>': 50265 };
+  assert.equal(langFromToken(lang_to_id, 50259), 'en');
+  assert.equal(langFromToken(lang_to_id, 50262), 'es');
+  // A third language is no evidence for either of the two the product knows.
+  assert.equal(langFromToken(lang_to_id, 50265), null);
+  assert.equal(langFromToken(lang_to_id, 1), null);
+  assert.equal(langFromToken(null, 50259), null);
+});
+```
+
+- [ ] **Step 2: Run the tests to verify they fail**
+
+Run: `node --test worker.test.js`
+Expected: FAIL — `langFromToken` is not exported.
+
+- [ ] **Step 3: The helper, then the detection path**
+
+In `worker.js`, beside `modelForLang`:
+
+```js
+// The language token Whisper emits first, read back through the model's own table.
+// Only the two languages in scope count: any other token is "no evidence", so the
+// caller keeps the language it had rather than adopting one the product cannot show.
+export function langFromToken(lang_to_id, tokenId) {
+  if (!lang_to_id) return null;
+  for (const [token, id] of Object.entries(lang_to_id)) {
+    if (id === tokenId) return token === '<|en|>' ? 'en' : token === '<|es|>' ? 'es' : null;
+  }
+  return null;
+}
+```
+
+Then, still in `worker.js`, a path the pipeline does not offer. Read the vendored `generate()` (`WhisperForConditionalGeneration.generate` and the generic `generate` above it, around the `_prepare_encoder_decoder_kwargs_for_generation` call) before writing it; the sketch below is the design, and the vendored file is the truth:
+
+```js
+const WHISPER_NAME = { en: 'english', es: 'spanish' };
+
+// One encoder pass, two decoder runs: the first emits the language token (Whisper's
+// native detection, which the pipeline never exposes — with no language it forces
+// English), the second transcribes in that language. The encoder is the cost of a
+// pass; the detection step is one token.
+async function detectAndTranscribe(audio, fallbackLang) {
+  const { model, processor, tokenizer } = transcriber;
+  const gc = model.generation_config;
+  const { input_features } = await processor(audio);
+  const prepared = await model._prepare_encoder_decoder_kwargs_for_generation({
+    inputs_tensor: input_features,
+    model_inputs: { input_features },
+    model_input_name: 'input_features',
+    generation_config: gc,
+  });
+  const encoder_outputs = prepared.encoder_outputs;
+  const probe = await model.generate({
+    inputs: input_features,
+    encoder_outputs,
+    decoder_input_ids: [gc.decoder_start_token_id],
+    max_new_tokens: 1,
+  });
+  const probeIds = probe.tolist()[0];
+  const lang = langFromToken(gc.lang_to_id, Number(probeIds[probeIds.length - 1])) || fallbackLang;
+  const ids = await model.generate({
+    inputs: input_features,
+    encoder_outputs,
+    language: WHISPER_NAME[lang] || 'english',
+    task: 'transcribe',
+  });
+  const text = tokenizer.decode(ids.tolist()[0], { skip_special_tokens: true });
+  return { text: (text || '').trim(), lang };
+}
+```
+
+In the `transcribe` branch of `self.onmessage`, after the existing `if (!transcriber) throw …` line, route detection requests to it and give every result a `lang` field:
+
+```js
+      if (msg.detect && transcriber.model.generation_config.is_multilingual) {
+        const out = await detectAndTranscribe(msg.audio, msg.lang || sessionLang);
+        self.postMessage({ type: 'result', id: msg.id, text: out.text, lang: out.lang });
+        return;
+      }
+      const opts = { chunk_length_s: 30, return_timestamps: false };
+      // …the existing language block, unchanged…
+      const out = await transcriber(msg.audio, opts);
+      self.postMessage({ type: 'result', id: msg.id, text: (out && out.text) || '', lang: null });
+```
+
+Pieces are at most `MAX_SEG_MS` (8 s) and previews carry at most `PREVIEW_TAIL_MS` (8 s) of audio, so the direct path needs no chunking; keep the pipeline path (with its `chunk_length_s: 30`) for single-language sessions, where the English-only model has no language table and nothing to detect.
+
+If `generate` rejects `decoder_input_ids` as a flat array, `[[gc.decoder_start_token_id]]` is the other shape it accepts (`prepareTensorForDecode`); if `encoder_outputs` is not honoured and the encoder runs twice, say so in the report with the measured cost rather than papering over it — the design still works, it just costs a second encoder pass on detection.
+
+- [ ] **Step 4: The offscreen document asks for detection in a bilingual session, on every local pass**
+
+In `offscreen.js`:
+
+1. `localTranscribe(audio, lang, detect = false)`: post `{ type: 'transcribe', id, audio, lang, detect }` and resolve `{ text: m.text, lang: m.lang ?? null }` instead of `m.text`.
+2. In `transcribe(seg, lane)`, the normalised call becomes:
+
+```js
+    const multi = state.settings.lang === 'multi';
+    const result = lane === 'api'
+      ? await apiTranscribe(seg.audio)
+      : await localTranscribe(seg.audio, state.lang[seg.speaker], multi);
+    const clean = (result.text || '').trim();
+    // What the engine heard outranks the sticky value, for previews and turns alike:
+    // it is what the line is decoded in, and what the next pass starts from.
+    if (result.lang) state.lang[seg.speaker] = result.lang;
+```
+
+3. In the preview branch nothing else changes: the `stitchLang` reset (Task 5) already discards a line whose language moved, and the `PARTIAL` broadcast already carries `state.lang[seg.speaker]`.
+4. In the authoritative branch, replace Task 10's whole detection block (the `let turnText`/`let turnLang`/votes/re-pass logic) with:
+
+```js
+      // No label from the engine (a Groq response without one): the text decides,
+      // but only in a bilingual session — a pinned session has no question to
+      // answer, and a one-word turn can score 1.0 for either language.
+      let turnLang = result.lang;
+      if (!turnLang && multi) {
+        const read = detect(clean);
+        if (read.lang && read.confidence >= LANG_CONFIDENCE) {
+          turnLang = read.lang;
+          state.lang[seg.speaker] = turnLang;
+        }
+      }
+```
+
+and keep the stored entry as `text: clean, lang: turnLang || state.lang[seg.speaker]`.
+
+5. Remove what Task 10 added and nothing now reads: `state.langVotes` (and its reset in `start()`), the `backup` slice at the top of `transcribe`. Keep `LANG_CONFIDENCE` and the `detect` import (used above).
+
+- [ ] **Step 5: Verify — and measure**
+
+```bash
+node .claude/skills/preflight/scripts/preflight.mjs
+node --test *.test.js
+node e2e/run.mjs bilingual --lang=multi
+node e2e/run.mjs bilingual --engine=api --lang=multi
+node e2e/run.mjs english
+```
+Expected: 0 failing, 0 warnings; 0 fail. In the first run every Spanish row shows `bubble lang` = es with `match` ≥ 70 % and `live match` well above the 6–14 % measured before; English rows stay ≥ 90 %. In the second, the same for turns (the stand-in labels them) and the live line. The third must stay within run-to-run variance of live 1.5–2.6 s and bubble 1.2–2.5 s (an English-only session takes the pipeline path and pays nothing).
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add worker.js worker.test.js offscreen.js
+git commit -m "$(cat <<'EOF'
+feat(worker): let Whisper name the language on every local pass
+
+Forced to English, the multilingual model does not produce garbage a
+text classifier can flag: it produces a fluent translation, so the
+re-pass never fired and every Spanish turn landed labelled English.
+Whisper's own first token is the language, and one encoder pass now
+serves both that step and the transcription, so a bilingual session
+detects on every pass — the live line is decoded in the right language
+from its first paint, and a turn never waits for a second opinion.
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
+EOF
+)"
+```
+
+---
+
+## Task 17: One writer for settings
+
+Tasks 13 and 14 added two more read-modify-write paths to `settings` (add a note from the side panel, add one from the overlay). Their reviews traced the pre-existing pattern: `toggleNote` in the side panel, `TOGGLE_NOTE` / `PILL_POS` / `PILL_HIDE` in the service worker and `saveUi` in the side panel each read the whole `settings` object, change one part and write it all back, with no ordering between them. Two of them in flight at once — a note toggled from the overlay while one is added from the panel, or the start button's `saveUi` while a note lands — and the second write silently discards the first: a whole note gone, not just an open flag. This task makes the service worker the only writer and queues its writes.
+
+**Files:**
+- Modify: `.claude/skills/message-contract/SKILL.md` — **first**
+- Modify: `background.js` (`patchSettings`, the four note/pill cases, a `PATCH_SETTINGS` case)
+- Modify: `sidepanel.js` (`saveUi`, `toggleNote`, the note form's submit)
+
+**Interfaces:**
+- Produces: `PATCH_SETTINGS` (ui → background): `{ patch }`, a shallow object merged over the stored settings; reply `{ ok, settings }` with the result. All settings writes in `background.js` go through `patchSettings(mutate)`, which runs them one after another.
+- Consumes: `addNote`, `toggleNoteOpen` from `phrasebook.js` (unchanged).
+- Options (`setup.js`) keeps its whole-form save: it is an explicit "Guardar" on a page nobody edits mid-call, and routing a 20-field form through a patch buys nothing here.
+
+- [ ] **Step 1: Document the message first**
+
+In `.claude/skills/message-contract/SKILL.md`, beside `ADD_NOTE`: `PATCH_SETTINGS`, sent by `sidepanel.js` to `background`, payload `patch` (an object whose keys are settings fields, merged over the stored object), reply `{ ok, settings }`. Note in the rules that **settings are written only by the service worker**, one write at a time, because every view that read-modify-writes the object on its own is a race with every other.
+
+- [ ] **Step 2: The single writer**
+
+In `background.js`, above the message listener:
+
+```js
+// Settings are one object that several views want to change one field of, at
+// the same time — a note toggled from the overlay while one is added from the
+// panel, the start button's save while a note lands. Read-modify-write from two
+// places loses whichever write comes second. So every change funnels through here,
+// queued: the worker is the only writer, and it writes one at a time. Module state
+// is ephemeral, which is fine — a suspended worker has nothing in flight.
+let settingsWrites = Promise.resolve();
+function patchSettings(mutate) {
+  const run = settingsWrites.then(async () => {
+    const { settings = {} } = await chrome.storage.local.get('settings');
+    const next = mutate(settings);
+    await chrome.storage.local.set({ settings: next });
+    return next;
+  });
+  settingsWrites = run.catch(() => {});
+  return run;
+}
+```
+
+Then rewrite the four existing cases and add the fifth:
+
+```js
+        case 'PILL_POS': {
+          await patchSettings((s) => ({ ...s, pillPos: msg.pos }));
+          sendResponse({ ok: true });
+          break;
+        }
+        case 'PILL_HIDE': {
+          const host = String(msg.host || '').toLowerCase();
+          await patchSettings((s) => {
+            const hosts = new Set(s.pillHiddenHosts || []);
+            if (host) hosts.add(host);
+            return { ...s, pillHiddenHosts: [...hosts] };
+          });
+          sendResponse({ ok: true });
+          break;
+        }
+        case 'TOGGLE_NOTE': {
+          await patchSettings((s) => toggleNoteOpen(s, msg.id));
+          sendResponse({ ok: true });
+          break;
+        }
+        case 'ADD_NOTE': {
+          await patchSettings((s) => addNote(s, { title: msg.title, body: msg.body }));
+          sendResponse({ ok: true });
+          break;
+        }
+        case 'PATCH_SETTINGS': {
+          const settings = await patchSettings((s) => ({ ...s, ...(msg.patch || {}) }));
+          sendResponse({ ok: true, settings });
+          break;
+        }
+```
+
+Keep each case's existing comment where it still says something true; drop the ones that described the read-modify-write.
+
+- [ ] **Step 3: The side panel stops writing settings itself**
+
+In `sidepanel.js`:
+
+`saveUi` sends a patch of the fields the panel owns and adopts the reply:
+
+```js
+async function saveUi() {
+  const patch = {
+    lang: els.lang.value,
+    themSource: els.themSource.value,
+    themDeviceId: els.themDevice.value || null,
+    captureMic: els.captureMic.checked,
+    sessionContext: els.sessionContext.value.trim().slice(0, CONTEXT_MAX_CHARS),
+    profile: els.profile.value.trim().slice(0, PROFILE_MAX_CHARS),
+  };
+  const res = await chrome.runtime.sendMessage({ type: 'PATCH_SETTINGS', patch }).catch(() => null);
+  settings = { ...DEFAULT_COACH, ...((res && res.settings) || { ...settings, ...patch }) };
+}
+```
+
+`toggleNote` becomes a message, as the overlay's already is:
+
+```js
+async function toggleNote(id) {
+  await chrome.runtime.sendMessage({ type: 'TOGGLE_NOTE', id }).catch(() => {});
+  // No re-render here: the write trips storage.onChanged in background.js, which
+  // re-broadcasts COACH_CHIPS to all three views at once.
+}
+```
+
+and the note form's submit handler (Task 13) sends `ADD_NOTE` instead of writing:
+
+```js
+els.noteForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const title = els.noteTitle.value;
+  const body = els.noteBody.value;
+  if (!title.trim() && !body.trim()) return;
+  await chrome.runtime.sendMessage({ type: 'ADD_NOTE', title, body }).catch(() => {});
+  els.noteForm.reset();
+  els.noteAdd.open = false;
+});
+```
+
+Remove the now-unused imports (`toggleNoteOpen`, `addNote`) from `sidepanel.js` if nothing else in the file uses them; keep `resolveChips`. Grep for any other `chrome.storage.local.set({ settings` left in `sidepanel.js` — there must be none.
+
+- [ ] **Step 4: Verify**
+
+```bash
+node .claude/skills/preflight/scripts/preflight.mjs
+node --test *.test.js
+```
+Expected: 0 failing, 0 warnings; 0 fail.
+
+End to end (controller): from the side panel page, send `ADD_NOTE` and `TOGGLE_NOTE` back to back without awaiting, then read `settings.notes` — both effects present (the new note exists, the toggled one flipped); a `PATCH_SETTINGS` of `profile` while a note lands keeps both.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add .claude/skills/message-contract/SKILL.md background.js sidepanel.js
+git commit -m "$(cat <<'EOF'
+fix(settings): one writer, one write at a time
+
+Every view read the whole settings object, changed one field and wrote
+it back, so two changes in flight — a note added from the panel while
+one is toggled from the overlay — lost whichever landed second. The
+service worker is now the only writer and queues its writes.
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
 EOF
 )"
 ```

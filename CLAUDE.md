@@ -144,6 +144,23 @@ Run preflight before claiming any change works, and reload the extension in
 Static checks cannot verify capture, permissions, or WebGPU; say so rather than implying they
 were tested.
 
+For anything that touches capture, segmentation, the queue, the worker or the live line, the
+end-to-end harness in `e2e/` is the evidence — it drives the installed Google Chrome over the
+DevTools pipe, loads a copy of the extension, and feeds a synthesised English/Spanish fixture
+through Chrome's fake microphone, so every sentence has a known onset and the run reports how
+long the live line and the bubble took:
+
+```bash
+node e2e/run.mjs english                 # one speaker, local engine (first run downloads the model)
+node e2e/run.mjs bilingual --lang=multi  # alternating languages
+node e2e/run.mjs english --engine=api    # Groq stand-in on localhost: no key, no audio leaves
+```
+
+It covers device lanes only: Chrome grants tab audio on a user invocation alone, so the tab
+lane stays a manual check. It needs no dependencies (Node 22+, `say`, `afconvert`) and nothing
+under `e2e/` ships — the release zip excludes it. Quote the measured numbers; do not summarise
+them as "fast".
+
 ## Specialists
 
 Delegate to these rather than reasoning about their domain inline:
