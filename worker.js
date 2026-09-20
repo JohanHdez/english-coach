@@ -117,8 +117,11 @@ const WHISPER_NAME = { en: 'english', es: 'spanish' };
 let detectBroken = false; // so a dead detection path is reported once, not per segment
 
 // Whether the loaded export has a language to name at all: the .en models carry no
-// language table, and asking them for one throws inside generate().
-const canDetect = () => !!transcriber?.model?.generation_config?.is_multilingual;
+// language table, and asking them for one throws inside generate(). Read through
+// _prepare_generation_config, the same merged config detectAndTranscribe uses below —
+// the raw generation_config.json can omit is_multilingual and let it fall back to the
+// model config, so the two must agree on where the flag comes from.
+const canDetect = () => !!transcriber?.model?._prepare_generation_config(null, {})?.is_multilingual;
 
 // One encoder pass, two decoder runs: the first emits the language token (Whisper's
 // native detection, which the pipeline never exposes — with no language it warns and
@@ -183,7 +186,7 @@ if (typeof self !== 'undefined') self.onmessage = async (e) => {
       }
       await ready; // wait for the first load instead of dropping the audio
       if (!transcriber) throw new Error('El modelo no se pudo cargar.');
-      if (msg.detect && canDetect()) {
+      if (msg.detect && !detectBroken && canDetect()) {
         try {
           const detected = await detectAndTranscribe(msg.audio, msg.lang || sessionLang);
           self.postMessage({ type: 'result', id: msg.id, text: detected.text, lang: detected.lang });

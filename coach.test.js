@@ -57,6 +57,31 @@ test('turnsToText always keeps at least the last turn, even over budget', () => 
   assert.ok(turnsToText(turns, 10, 5).includes('tiny budget'));
 });
 
+test('turnsToText labels a turn whose language differs from the session', () => {
+  const turns = [
+    { speaker: 'me', text: 'Hola, buenos días.', lang: 'es' },
+    { speaker: 'them', text: 'Good morning.', lang: 'en' },
+  ];
+  const text = turnsToText(turns, 10, Infinity, Infinity, 'en');
+  assert.ok(text.includes('LEARNER [es]: Hola, buenos días.'));
+  assert.ok(text.includes('OTHER: Good morning.'), 'a turn matching the session language gets no label');
+});
+
+test('turnsToText labels every lang-carrying turn in a multi session', () => {
+  const turns = [
+    { speaker: 'me', text: 'Hola, buenos días.', lang: 'es' },
+    { speaker: 'them', text: 'Good morning.', lang: 'en' },
+  ];
+  const text = turnsToText(turns, 10, Infinity, Infinity, 'multi');
+  assert.ok(text.includes('LEARNER [es]: Hola, buenos días.'));
+  assert.ok(text.includes('OTHER [en]: Good morning.'), "'multi' has no single unlabelled language");
+});
+
+test('turnsToText leaves an entry with no lang unlabelled, even in a multi session', () => {
+  const turns = [{ speaker: 'me', text: 'no lang on this one' }];
+  assert.ok(turnsToText(turns, 10, Infinity, Infinity, 'multi').includes('LEARNER: no lang on this one'));
+});
+
 test('contextBlock is empty when there are no notes', () => {
   assert.equal(contextBlock({}), '');
   assert.equal(contextBlock({ sessionContext: '   ' }), '');
@@ -181,6 +206,77 @@ test('askReply clips a repetition-loop turn out of its prompt', async () => {
   const user = seen.body.messages.find((m) => m.role === 'user').content;
   assert.ok(!user.includes('be able to '.repeat(50)), 'the repetition loop reached the prompt whole');
   assert.ok(user.length < 2500, `reply prompt grew to ${user.length} chars`);
+});
+
+test("askReply's system prompt names the 'multi' rule only for a bilingual session", async () => {
+  const seen = {};
+  const restore = stubGroq(seen, REPLY_JSON);
+  try {
+    await askReply({ turns: TURNS, settings: { ...REPLY_SETTINGS, lang: 'multi' } });
+  } finally { restore(); }
+  const system = seen.body.messages.find((m) => m.role === 'system').content;
+  assert.ok(/mixes English and Spanish/.test(system));
+});
+
+test("askReply's system prompt says nothing about mixed languages for a plain English session", async () => {
+  const seen = {};
+  const restore = stubGroq(seen, REPLY_JSON);
+  try {
+    await askReply({ turns: TURNS, settings: REPLY_SETTINGS });
+  } finally { restore(); }
+  const system = seen.body.messages.find((m) => m.role === 'system').content;
+  assert.ok(!/mixes English and Spanish/.test(system));
+});
+
+test('askReply labels turns with their language in a bilingual session', async () => {
+  const turns = [
+    { speaker: 'them', text: 'How is the migration going?', lang: 'en' },
+    { speaker: 'me', text: 'Va bien, gracias.', lang: 'es' },
+  ];
+  const seen = {};
+  const restore = stubGroq(seen, REPLY_JSON);
+  try {
+    await askReply({ turns, settings: { ...REPLY_SETTINGS, lang: 'multi' } });
+  } finally { restore(); }
+  const user = seen.body.messages.find((m) => m.role === 'user').content;
+  assert.ok(user.includes('OTHER [en]: How is the migration going?'));
+  assert.ok(user.includes('LEARNER [es]: Va bien, gracias.'));
+});
+
+test("askReport's system prompt names the 'multi' rule only for a bilingual session", async () => {
+  const seen = {};
+  const restore = stubGroq(seen, 'Informe.');
+  try {
+    await askReport({ turns: TURNS, settings: { ...REPLY_SETTINGS, lang: 'multi' } });
+  } finally { restore(); }
+  const system = seen.body.messages.find((m) => m.role === 'system').content;
+  assert.ok(system.includes('[es]') && system.includes('[en]'));
+  assert.ok(/nunca las eval/.test(system), 'must say the Spanish turns are never graded');
+});
+
+test("askReport's system prompt says nothing about mixed languages for a plain English session", async () => {
+  const seen = {};
+  const restore = stubGroq(seen, 'Informe.');
+  try {
+    await askReport({ turns: TURNS, settings: REPLY_SETTINGS });
+  } finally { restore(); }
+  const system = seen.body.messages.find((m) => m.role === 'system').content;
+  assert.ok(!system.includes('[es]'));
+});
+
+test('askReport labels turns with their language in a bilingual session', async () => {
+  const turns = [
+    { speaker: 'me', text: 'Sí, absolutamente.', t: 1000, dur: 1, lang: 'es' },
+    { speaker: 'them', text: 'Great, thanks.', t: 2000, dur: 1, lang: 'en' },
+  ];
+  const seen = {};
+  const restore = stubGroq(seen, 'Informe.');
+  try {
+    await askReport({ turns, settings: { ...REPLY_SETTINGS, lang: 'multi' } });
+  } finally { restore(); }
+  const user = seen.body.messages.find((m) => m.role === 'user').content;
+  assert.ok(user.includes('LEARNER [es]: Sí, absolutamente.'));
+  assert.ok(user.includes('OTHER [en]: Great, thanks.'));
 });
 
 test('askReport marks the transcript partial when a turn is clipped, even if none is dropped', async () => {

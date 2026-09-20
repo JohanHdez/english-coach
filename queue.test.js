@@ -103,8 +103,8 @@ test('takeNext removes and returns the first segment the lane wants, leaving the
     { speaker: 'them', preview: true, id: 3 },
     { speaker: 'them', id: 4 },
   ];
-  const real = takeNext(queue, (s) => !s.preview);
-  assert.equal(real.id, 2);
+  const authoritative = takeNext(queue, (s) => !s.preview);
+  assert.equal(authoritative.id, 2);
   assert.deepEqual(queue.map((s) => s.id), [1, 3, 4]);
   const preview = takeNext(queue, (s) => s.preview);
   assert.equal(preview.id, 1);

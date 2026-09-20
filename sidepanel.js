@@ -580,15 +580,10 @@ async function loadDevices() {
   }
 }
 
-async function saveUi() {
-  const patch = {
-    lang: els.lang.value,
-    themSource: els.themSource.value,
-    themDeviceId: els.themDevice.value || null,
-    captureMic: els.captureMic.checked,
-    sessionContext: els.sessionContext.value.trim().slice(0, CONTEXT_MAX_CHARS),
-    profile: els.profile.value.trim().slice(0, PROFILE_MAX_CHARS),
-  };
+// One field per call: the side panel and the floating window are the same page
+// open twice, and a six-field patch from either one overwrites whatever the
+// other just changed with its own stale copy of the other five.
+async function saveUi(patch) {
   const res = await chrome.runtime.sendMessage({ type: 'PATCH_SETTINGS', patch }).catch(() => null);
   settings = { ...DEFAULT_COACH, ...((res && res.settings) || { ...settings, ...patch }) };
 }
@@ -630,18 +625,20 @@ async function init() {
 
 // ------------------------------------------------------------------ events
 
-els.lang.addEventListener('change', saveUi);
+els.lang.addEventListener('change', () => saveUi({ lang: els.lang.value }));
 els.themSource.addEventListener('change', async () => {
   els.deviceField.hidden = els.themSource.value !== 'device';
-  await saveUi();
+  await saveUi({ themSource: els.themSource.value });
 });
-els.themDevice.addEventListener('change', saveUi);
-els.captureMic.addEventListener('change', saveUi);
+els.themDevice.addEventListener('change', () => saveUi({ themDeviceId: els.themDevice.value || null }));
+els.captureMic.addEventListener('change', () => saveUi({ captureMic: els.captureMic.checked }));
 // Unlike the source controls, the context stays enabled during a session on
 // purpose: the offscreen document re-reads settings on every coach call, so
 // notes edited mid-interview reach the very next suggested reply.
-els.sessionContext.addEventListener('change', saveUi);
-els.profile.addEventListener('change', saveUi);
+els.sessionContext.addEventListener('change', () =>
+  saveUi({ sessionContext: els.sessionContext.value.trim().slice(0, CONTEXT_MAX_CHARS) }));
+els.profile.addEventListener('change', () =>
+  saveUi({ profile: els.profile.value.trim().slice(0, PROFILE_MAX_CHARS) }));
 
 els.noteForm.addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -662,7 +659,8 @@ els.toggle.addEventListener('click', async () => {
     setRunning(false);
     return;   // the offscreen document fires the automatic report on stop
   }
-  await saveUi();
+  // Every field already persisted on its own change, which fires on blur before
+  // this click lands — no patch to send here.
   setStatus('Iniciando captura…');
   // Before START, never after: the offscreen document broadcasts LIVE_STATE from
   // inside start(), so it lands while this await is still pending.

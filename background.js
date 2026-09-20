@@ -5,6 +5,10 @@ import { resolveChips, toggleNoteOpen, addNote } from './phrasebook.js';
 
 const OFFSCREEN_URL = 'offscreen.html';
 
+// The only fields PATCH_SETTINGS may touch: the side panel's own controls. An
+// unlisted key (an API key, say) never reaches the merge, whatever a sender asks for.
+const PATCHABLE_SETTINGS = ['lang', 'themSource', 'themDeviceId', 'captureMic', 'sessionContext', 'profile'];
+
 // The tab currently showing the overlay, plus the last broadcast state, so the
 // bar can be rebuilt in any tab without losing what it was showing.
 let sessionTabId = null;
@@ -495,9 +499,16 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         }
         // The side panel's own fields (language, source, context, profile): a
         // shallow merge over the stored object, queued like every other write.
+        // Only PATCHABLE_SETTINGS keys apply, and the reply omits the API keys —
+        // the side panel never reads them, so it never needs them echoed back.
         case 'PATCH_SETTINGS': {
-          const settings = await patchSettings((s) => ({ ...s, ...(msg.patch || {}) }));
-          sendResponse({ ok: true, settings });
+          const patch = {};
+          for (const key of PATCHABLE_SETTINGS) {
+            if (key in (msg.patch || {})) patch[key] = msg.patch[key];
+          }
+          const settings = await patchSettings((s) => ({ ...s, ...patch }));
+          const { groqKey, anthropicKey, ...visible } = settings;
+          sendResponse({ ok: true, settings: visible });
           break;
         }
         case 'OPEN_REPORT': {

@@ -302,12 +302,13 @@ async function apiTranscribe(audio) {
   return { text: data.text || '', lang: detected };
 }
 
-// ---------------------------------------------------------------- serial queue
+// ---------------------------------------------------------------- two-lane queue
 
-// Ordering lives in queue.js, where it is testable. The one rule that matters
-// here: the live line outranks the archive, so previews go ahead of queued real
-// segments — a turn landing in its bubble a beat later costs the learner nothing,
-// a live line that freezes while someone talks costs them the conversation.
+// Ordering lives in queue.js, where it is testable. Dispatch here is one segment
+// in flight per resource — the local engine and the API each get their own lane —
+// and previews are local on every engine, whatever engine transcribes real turns.
+// MAX_PREVIEW_BYPASS bounds how many passes a real segment yields to within its own
+// lane; it says nothing about the other lane, or about the queue as a whole.
 function enqueue(seg) {
   insertReal(state.queue, seg);
   broadcast({ type: 'QUEUE', pending: pendingCount() });
@@ -461,12 +462,15 @@ async function transcribe(seg, lane) {
       // stays frozen on screen until that speaker talks again.
       clearPartial(seg.speaker);
     }
-    if (!seg.preview) state.realDone[seg.speaker] = Math.max(state.realDone[seg.speaker], seg.startedAt);
   } catch (e) {
     // A failed preview stays silent: the real segment reports the same problem
     // a moment later, and one toast per second would bury it.
     if (!seg.preview) status('Error transcribiendo: ' + (e.message || e), 'error');
   } finally {
+    // Set even if the block above threw: a segment that failed still finished, and
+    // leaving the watermark behind would let a late preview of it repaint a line
+    // whose turn has already moved on.
+    if (!seg.preview) state.realDone[seg.speaker] = Math.max(state.realDone[seg.speaker], seg.startedAt);
     state.inFlight[lane] = null;
     broadcast({ type: 'QUEUE', pending: pendingCount() });
     drain();
@@ -615,7 +619,10 @@ async function startLiveLayer(themStream) {
   // half the room and mis-transcribe the other half, so the Whisper preview lane —
   // which decodes whichever language the speaker's turn is in — covers both.
   if (state.settings?.lang === 'multi') {
-    broadcastLiveState('unavailable', { fallback: previewFallback() });
+    broadcastLiveState('unavailable', {
+      detail: 'un reconocedor solo escucha un idioma a la vez',
+      fallback: previewFallback(),
+    });
     return;
   }
   const lang = state.settings?.lang === 'es' ? 'es-ES' : 'en-US';
