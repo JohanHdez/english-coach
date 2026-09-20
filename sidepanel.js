@@ -44,8 +44,12 @@ Transcripción:
 
 const fmtTime = (t) => new Date(t).toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 const sorted = () => [...entries].sort((a, b) => a.t - b.t);
-// In a Spanish session the learner is the native speaker: nothing to translate.
-const traducir = () => settings.translate !== false && settings.lang !== 'es';
+// Whether translation is switched on at all. Which turns actually get translated is
+// a per-turn decision now: a Spanish turn needs no Spanish line under it, and in a
+// bilingual meeting both kinds arrive on the same speaker.
+const traducir = () => settings.translate !== false;
+// An entry stored before languages existed reads as English, which is what it was.
+const langOf = (x) => (x && x.lang === 'es' ? 'es' : 'en');
 
 // The DOM is capped, not rebuilt on every turn: rebuilding threw the scroll
 // position away, so reading back through the conversation was impossible while
@@ -80,7 +84,7 @@ function renderSticky() {
   const p = document.createElement('div');
   p.textContent = t.text;
   els.sticky.append(who, p);
-  if (t.es) {
+  if (t.es && langOf(t) !== 'es') {
     const es = document.createElement('span');
     es.className = 'es';
     es.textContent = t.es;
@@ -123,10 +127,14 @@ function bubbleNode(e) {
   const meta = document.createElement('span');
   meta.className = 'meta';
   meta.textContent = `${e.speaker === 'me' ? 'Yo' : 'Interlocutor'} · ${fmtTime(e.t)}`;
+  const tag = document.createElement('span');
+  tag.className = 'lang-tag';
+  tag.textContent = langOf(e) === 'es' ? 'ES' : 'EN';
+  meta.append(' ', tag);
   const p = document.createElement('span');
   p.textContent = e.text;
   div.append(meta, p);
-  if (e.speaker !== 'me' && traducir()) {
+  if (e.speaker !== 'me' && langOf(e) !== 'es' && traducir()) {
     const es = document.createElement('span');
     es.className = 'es';
     div.append(es);
@@ -419,7 +427,7 @@ let partialTrSeq = 0;
 let partialTrShown = 0;
 const PARTIAL_TR_MS = 1000;
 
-function showPartial(speaker, text, committed = '') {
+function showPartial(speaker, text, committed = '', lang = 'en') {
   const p = partials[speaker] || partials.them;
   if (p.es) clearTimeout(partialTimer);
   if (!text) {
@@ -440,7 +448,7 @@ function showPartial(speaker, text, committed = '') {
   const settled = committed && text.startsWith(committed) ? committed : '';
   p.en.textContent = settled;
   p.tail.textContent = text.slice(settled.length);
-  if (!p.es || !traducir()) return;
+  if (!p.es || !traducir() || lang === 'es') return;
   const wait = Math.max(0, PARTIAL_TR_MS - (Date.now() - partialTrAt));
   partialTimer = setTimeout(() => {
     partialTrAt = Date.now();
@@ -689,7 +697,7 @@ chrome.runtime.onMessage.addListener((msg) => {
   // A repeated (speaker, t) is a turn extended by folding: addEntry replaces it,
   // which also drops the cached translation so the merged text retranslates whole.
   if (msg.type === 'SEGMENT') addEntry(msg.entry);
-  else if (msg.type === 'PARTIAL') showPartial(msg.speaker === 'me' ? 'me' : 'them', msg.text, msg.committed);
+  else if (msg.type === 'PARTIAL') showPartial(msg.speaker === 'me' ? 'me' : 'them', msg.text, msg.committed, msg.lang);
   else if (msg.type === 'LIVE_STATE') {
     if (msg.state !== 'available') showPartial('them', '');
     showLiveNote(msg);

@@ -266,6 +266,13 @@
     .turn { font-size: 12px; padding: 5px 8px; border-radius: 8px; background: #24272d; }
     .turn.me { background: #1e3a5f; }
     .turn span { display: block; font-size: 10px; color: #9aa0a6; }
+    /* Which language the turn was spoken in. Small and quiet: it matters when scanning
+       a bilingual meeting and must not compete with the words. Overriding .turn span's
+       block display keeps it inline next to the speaker label. */
+    .turn .lang-tag {
+      display: inline-block; font-size: 9px; letter-spacing: .06em; padding: 0 3px;
+      border-radius: 3px; border: 1px solid #3a4048; color: #9aa0a6;
+    }
     .turn .es { display: block; color: #9aa0a6; font-size: 11px; font-style: italic; margin-top: 3px; }
     /* No blanket opacity: the dashed border already says provisional, and dimming
        the box on top of dimming the unsettled tail left a fresh phrase — which has
@@ -496,6 +503,8 @@
   // back. It only gives way when they speak again — and what it displaces is what
   // the counter counts, so the number always means "below here, and unreadable".
   const latestThem = () => [...turns].reverse().find((t) => t.speaker !== 'me') || null;
+  // An entry stored before languages existed reads as English, which is what it was.
+  const langOf = (x) => (x && x.lang === 'es' ? 'es' : 'en');
 
   function renderSticky() {
     const box = $('.sticky');
@@ -563,10 +572,14 @@
     div.dataset.key = t.speaker + ':' + t.t;
     const who = document.createElement('span');
     who.textContent = t.speaker === 'me' ? 'Yo' : 'Interlocutor';
+    const tag = document.createElement('span');
+    tag.className = 'lang-tag';
+    tag.textContent = langOf(t) === 'es' ? 'ES' : 'EN';
+    who.append(' · ', tag);
     const p = document.createElement('div');
     p.textContent = t.text;
     div.append(who, p);
-    if (t.speaker !== 'me' && translateOn) {
+    if (t.speaker !== 'me' && langOf(t) !== 'es' && translateOn) {
       const es = document.createElement('span');
       es.className = 'es';
       div.append(es);
@@ -697,7 +710,7 @@
   let partialTrShown = 0;
   const PARTIAL_TR_MS = 1000;
 
-  function showPartial(speaker, text, committed = '') {
+  function showPartial(speaker, text, committed = '', lang = 'en') {
     const box = $(speaker === 'me' ? '.partial.me' : '.partial.them');
     const en = box.querySelector('.partial-en');
     const tail = box.querySelector('.partial-tail');
@@ -722,7 +735,7 @@
     const settled = committed && text.startsWith(committed) ? committed : '';
     en.textContent = settled;
     tail.textContent = text.slice(settled.length);
-    if (!es || !translateOn) return;
+    if (!es || !translateOn || lang === 'es') return;
     const wait = Math.max(0, PARTIAL_TR_MS - (Date.now() - partialTrAt));
     partialTimer = setTimeout(() => {
       partialTrAt = Date.now();
@@ -1038,7 +1051,7 @@
       case 'COACH_CHIPS': showChips(msg); break;
       case 'REPLY': show(true); showReply(msg); break;
       case 'QUEUE': if (msg.pending > 0) setStatus(`Transcribiendo… (${msg.pending})`); break;
-      case 'PARTIAL': if (msg.text) show(true); showPartial(msg.speaker === 'me' ? 'me' : 'them', msg.text, msg.committed); break;
+      case 'PARTIAL': if (msg.text) show(true); showPartial(msg.speaker === 'me' ? 'me' : 'them', msg.text, msg.committed, msg.lang); break;
       case 'LIVE_STATE': if (msg.state !== 'available') showPartial('them', ''); showLiveNote(msg); break;
       default: break;
     }

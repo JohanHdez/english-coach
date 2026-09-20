@@ -227,6 +227,12 @@ button.ghost { background: transparent; border-color: var(--border); }
 .bubble.me { background: var(--me); border-color: var(--me-border); align-self: flex-end; }
 .bubble.them { background: var(--them); border-color: var(--border); align-self: flex-start; }
 .meta { display: block; font-size: 10px; color: var(--muted); margin-bottom: 2px; letter-spacing: .02em; }
+/* Which language the turn was spoken in. Small and quiet: it matters when scanning
+   a bilingual meeting and must not compete with the words. */
+.lang-tag {
+  font-size: 9px; letter-spacing: .06em; padding: 0 3px; border-radius: 3px;
+  border: 1px solid var(--border); color: var(--muted);
+}
 
 footer { border-top: 1px solid var(--border); padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
 footer .row { display: flex; gap: 6px; }
