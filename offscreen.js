@@ -7,6 +7,7 @@ import { askReply, askReport, groqBaseOf, redact, resolveProvider, PROVIDERS, DE
 import { startLive, liveAvailability } from './live.js';
 import { EMPTY as STITCH_EMPTY, stitch } from './stitch.js';
 import { insertPreview, insertReal, takeNext } from './queue.js';
+import { detect } from './langid.js';
 
 // A preview has to cost less than the interval that schedules it, or the lane
 // stops paying for itself: on the WASM fallback a single pass can take seconds,
@@ -18,6 +19,10 @@ const PREVIEW_SLOW_ROUNDS = 2;
 // counts as dead rather than slow to warm up. Retiring a working layer only costs
 // the learner word-by-word text; keeping a dead one costs them every live line.
 const LIVE_PROOF_MS = 6000;
+// Below this, langid.js saw mixed evidence — an English sentence carrying a Spanish
+// name, say — and switching a speaker's language on that would be worse than
+// keeping the one that is working.
+const LANG_CONFIDENCE = 0.5;
 
 const state = {
   running: false,
@@ -270,11 +275,18 @@ function localTranscribe(audio, lang) {
 async function apiTranscribe(audio) {
   const key = state.settings.groqKey;
   if (!key) throw new Error('Falta la API key de Groq (ábrela en Ajustes).');
+  const multi = state.settings.lang === 'multi';
   const form = new FormData();
   form.append('file', floatToWav(audio), 'audio.wav');
   form.append('model', state.settings.groqModel || 'whisper-large-v3-turbo');
-  form.append('language', state.settings.lang === 'es' ? 'es' : 'en');
-  form.append('response_format', 'json');
+  // In a bilingual meeting the language is the question, not an input: omitting it
+  // is what makes Whisper detect it, and it costs nothing extra — the price is per
+  // hour of audio either way. A single-language session keeps pinning it, which the
+  // API documents as better for accuracy and latency.
+  if (!multi) form.append('language', state.settings.lang === 'es' ? 'es' : 'en');
+  // verbose_json is where a detected language can come back. It is not promised, so
+  // the caller falls back to langid.js.
+  form.append('response_format', multi ? 'verbose_json' : 'json');
   const res = await fetch(`${groqBaseOf(state.settings)}/openai/v1/audio/transcriptions`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${key}` },
@@ -282,7 +294,12 @@ async function apiTranscribe(audio) {
   });
   if (!res.ok) throw new Error(`Groq ${res.status}: ${redact(await res.text()).slice(0, 200)}`);
   const data = await res.json();
-  return data.text || '';
+  const reported = typeof data.language === 'string' ? data.language.toLowerCase() : '';
+  // Whisper names languages in English words ("spanish"), not codes.
+  const detected = /^(es|spa|spanish|castilian|español)$/.test(reported) ? 'es'
+    : /^(en|eng|english|inglés)$/.test(reported) ? 'en'
+    : null;
+  return { text: data.text || '', lang: detected };
 }
 
 // ---------------------------------------------------------------- serial queue
@@ -365,8 +382,10 @@ function drain() {
 async function transcribe(seg, lane) {
   const startedAt = Date.now();
   try {
-    const text = lane === 'api' ? await apiTranscribe(seg.audio) : await localTranscribe(seg.audio, state.lang[seg.speaker]);
-    const clean = (text || '').trim();
+    const result = lane === 'api'
+      ? await apiTranscribe(seg.audio)
+      : { text: await localTranscribe(seg.audio, state.lang[seg.speaker]), lang: null };
+    const clean = (result.text || '').trim();
     if (seg.preview) {
       // Consecutive rounds, which is what the constant has always claimed. Counting
       // cumulatively meant two slow passes twenty minutes apart retired the lane.
@@ -410,6 +429,13 @@ async function transcribe(seg, lane) {
         state.liveSilentMs += seg.durationMs || 0;
         if (state.liveSilentMs >= LIVE_PROOF_MS) retireSilentLiveLayer();
       }
+      // What the engine detected outranks what langid.js reads off the text, and both
+      // outrank the sticky value. This is also what the next preview is decoded with,
+      // so the live line follows a speaker's switch within one turn.
+      const read = detect(clean);
+      const turnLang = result.lang
+        || (read.confidence >= LANG_CONFIDENCE ? read.lang : null);
+      if (turnLang) state.lang[seg.speaker] = turnLang;
       await appendTranscript({
         speaker: seg.speaker,
         text: clean,
