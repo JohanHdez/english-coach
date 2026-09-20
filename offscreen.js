@@ -577,6 +577,13 @@ async function start(streamId, settings, streamKind) {
 async function startLiveLayer(themStream) {
   state.liveHeard = false;
   state.liveSilentMs = 0;
+  // A recogniser listens for one language. In a bilingual meeting it would hear
+  // half the room and mis-transcribe the other half, so the Whisper preview lane —
+  // which decodes whichever language the speaker's turn is in — covers both.
+  if (state.settings?.lang === 'multi') {
+    broadcastLiveState('unavailable', { fallback: previewFallback() });
+    return;
+  }
   const lang = state.settings?.lang === 'es' ? 'es-ES' : 'en-US';
   const estado = await liveAvailability(lang);
   if (estado !== 'available' && estado !== 'unknown') {

@@ -288,14 +288,24 @@ const countContext = wireCounter('sessionContext', 'contextCount', CONTEXT_MAX_C
 // control — it lives in the side panel — so it is read from storage here;
 // reporting on en-US while the learner runs Spanish sessions answers the wrong
 // question.
-async function liveLang() {
+async function sessionLang() {
   const { settings = {} } = await chrome.storage.local.get('settings');
-  return settings.lang === 'es' ? 'es-ES' : 'en-US';
+  return settings.lang || 'en';
+}
+
+async function liveLang() {
+  return (await sessionLang()) === 'es' ? 'es-ES' : 'en-US';
 }
 
 async function checkLive() {
   const el = $('liveStatus');
   const boton = $('installLive');
+  if ((await sessionLang()) === 'multi') {
+    el.textContent = 'En una reunión bilingüe la transcripción en vivo la hace Whisper, no el reconocimiento del navegador: un reconocedor sólo escucha un idioma.';
+    el.className = 'hint';
+    boton.hidden = true;
+    return;
+  }
   const estado = await liveAvailability(await liveLang());
   const [texto, clase] = LIVE_MSG[estado] || LIVE_MSG.unavailable;
   el.textContent = texto;

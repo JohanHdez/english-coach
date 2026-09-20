@@ -429,7 +429,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             status: lastUi.status,
             live: lastUi.live,
             paused: lastUi.paused,
-            translate: settings.translate !== false && settings.lang !== 'es',
+            // Whether translation is on at all; which turns get one is decided per
+            // turn by the views (a Spanish turn never does), not by the session.
+            translate: settings.translate !== false,
             pillPos: settings.pillPos || null,
             pillHidden: (settings.pillHiddenHosts || []).includes(hostOf(sender)),
           });
