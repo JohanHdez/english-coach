@@ -227,6 +227,8 @@ export function isJunk(text) {
   return FILLERS.test(bare);
 }
 
+// The VAD cuts by silence, not by ideas: a thinking pause splits one thought into
+// two segments, and each half would be shown — and translated — on its own.
 // Consecutive entries of the same speaker within MERGE_GAP_MS fold into the
 // previous turn (until it reaches MERGE_MAX_CHARS). A folded turn is cut at its
 // last finished sentence: the head stays as the turn it was, closed for good, and
@@ -239,7 +241,7 @@ export const MERGE_MAX_CHARS = 400;
 // A sentence end followed by more text: the terminal mark, any closing quote or
 // bracket, whitespace, then a sentence opener. Whisper capitalises sentence starts,
 // and requiring the opener is what keeps "1.5 million" and "fine. go ahead" whole.
-const SENTENCE_END = /[.!?…]["'"')\]]*\s+(?=[A-ZÁÉÍÓÚÑ¿¡])/g;
+const SENTENCE_END = /[.!?…]["”'’)\]]*\s+(?=[A-ZÁÉÍÓÚÑ¿¡])/g;
 
 // Index where the tail after the last finished sentence begins, or -1 when the
 // text has no sentence end that leaves a tail.

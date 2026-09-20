@@ -452,6 +452,7 @@ test('sentenceCut finds the tail after the last sentence end', () => {
   assert.equal(sentenceCut('Fine. Go ahead'), 6);
   assert.equal(sentenceCut('Really? Yes. Go ahead'), 13);
   assert.equal(sentenceCut('He said "done." Then left'), 16);
+  assert.equal(sentenceCut('He said "done." Then left'), 16);
   assert.equal(sentenceCut('Claro. ¿Y el viernes?'), 7);
   assert.equal(sentenceCut('Wait… Okay'), 6);
 });
