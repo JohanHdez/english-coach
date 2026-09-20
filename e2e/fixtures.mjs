@@ -29,6 +29,9 @@ export const SENTENCES = {
   // One breath, no punctuation: the synthesiser leaves no dip long enough for a
   // soft cut, so only the forced cut can split it.
   en_long: { voice: 'Samantha', lang: 'en', text: 'and then we moved the whole payment platform over to the new framework while keeping every single existing integration alive which meant the team had to rewrite the checkout flow and the refund flow and the reporting jobs at the same time without ever taking the service down for the customers who were paying us every minute of every day' },
+  // Half a minute in one breath: long enough to cross three forced cuts, which is
+  // where a live line that survives one cut can still die.
+  en_long30: { voice: 'Daniel', lang: 'en', text: 'okay so just a warning I might ramble a little because I am actually kind of excited to see whether your station can keep up with me it is honestly impressive that you built your own support system just to feel more comfortable in the room and I love that you are treating me like a crash test dummy for your project it makes me feel like we are officially in a technical partnership now and I am totally here for it so go ahead and put that translation engine to work and let me know if it is actually keeping pace with my speed or if it is starting to sweat because I can talk like this for a very long time without ever stopping to take a breath' },
 };
 
 // name → [ silenceSeconds | sentenceKey, ... ]
@@ -39,6 +42,9 @@ export const TIMELINES = {
   bilingual: [1.0, 'en1', 1.5, 'es1', 1.5, 'en2', 1.5, 'es2', 1.5, 'en3', 1.5, 'es3', 2.0],
   // A speaker who never pauses: how soon the first words of a monologue land.
   monologue: [1.0, 'en_long', 2.0],
+  // The thirty-second test: a live line that is fine at the first cut and gone by
+  // the third only shows up here.
+  monologue30: [1.0, 'en_long30', 2.0],
 };
 
 function synth(key) {

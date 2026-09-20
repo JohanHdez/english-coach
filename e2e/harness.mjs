@@ -24,6 +24,7 @@ export const RESULTS = join(HERE, 'results');
 export const SNAPSHOT = join(HERE, '.snapshot');
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const SAMPLE_MS = 250;
 
 // The shipped files only, the same set the release zip takes: no dotfiles, tests,
 // docs, tooling or this harness. The copy's manifest gets a fourth version
@@ -154,7 +155,45 @@ export class Session {
         if (m && m.target === 'ui') __e2e(JSON.stringify({ t: Date.now(), ...m }));
       }); true`);
     await session.applySettings(settings);
+    await session.prepareLive(log);
     return session;
+  }
+
+  // What a real install has and a throwaway profile does not: the on-device
+  // Web Speech pack for the other speaker's word-by-word line, and the built-in
+  // translator's English→Spanish model. Both are one-time downloads into
+  // e2e/.profile; without them a run measures the Whisper preview lane and no
+  // translation at all, which is not what the learner sees.
+  async prepareLive(log = () => {}) {
+    const wants = [];
+    if (this.settings.themSource === 'device' && this.settings.lang !== 'multi') {
+      const lang = this.settings.lang === 'es' ? 'es-ES' : 'en-US';
+      wants.push(`(async () => {
+        const SR = globalThis.SpeechRecognition || globalThis.webkitSpeechRecognition;
+        if (!SR || typeof SR.available !== 'function') return 'speech: unsupported';
+        const before = await SR.available({ langs: ['${lang}'], processLocally: true });
+        if (before === 'available') return 'speech: available';
+        const ok = await SR.install({ langs: ['${lang}'], processLocally: true });
+        return 'speech: ' + before + ' → install ' + ok + ' → ' + await SR.available({ langs: ['${lang}'], processLocally: true });
+      })()`);
+    }
+    if (this.settings.translate) {
+      wants.push(`(async () => {
+        if (typeof Translator === 'undefined') return 'translator: unsupported';
+        const opts = { sourceLanguage: 'en', targetLanguage: 'es' };
+        const before = await Translator.availability(opts);
+        if (before === 'unavailable') return 'translator: unavailable';
+        const t = await Translator.create(opts);
+        const sample = await t.translate('Give me a second.');
+        return 'translator: ' + before + ' → ready (' + sample + ')';
+      })()`);
+    }
+    // A pack that will not install is reported, not fatal: the run then measures
+    // whichever lane is left, and the log says which.
+    for (const expr of wants) {
+      const outcome = await this.chrome.evaluate(this.page, expr, { userGesture: true }).catch((e) => e.message);
+      log(outcome);
+    }
   }
 
   async applySettings(settings) {
@@ -225,11 +264,29 @@ export class Session {
 
   // The measured session: the fixture plays from its first sample as the
   // microphone opens, so the RUNNING broadcast is t0 within a few tens of ms.
+  // What the side panel paints on its live lines, sampled every SAMPLE_MS. The
+  // protocol log says what the offscreen document sent; this says what the reader
+  // saw, translation and all — the two can disagree, and only the second one is
+  // the complaint.
+  async sampleLive() {
+    return this.chrome.evaluate(this.page, `(() => {
+      const t = (id) => (document.getElementById(id) || {}).textContent || '';
+      const hidden = (id) => !!(document.getElementById(id) || {}).hidden;
+      return { t: Date.now(),
+        them: { hidden: hidden('partialThem'), en: t('partialThemEn') + t('partialThemTail'), es: t('partialThemEs') },
+        me: { hidden: hidden('partialMe'), en: t('partialMeEn') + t('partialMeTail') },
+        bubbles: document.querySelectorAll('#transcript .bubble').length };
+    })()`);
+  }
+
   async record(log = () => {}, { onStart } = {}) {
+    const samples = [];
     const { t0 } = await this.start();
     if (onStart) onStart(t0);
     const total = this.manifest.duration * 1000;
+    const sampler = setInterval(() => { this.sampleLive().then((s) => samples.push(s)).catch(() => {}); }, SAMPLE_MS);
     await sleep(total + 1500);
+    clearInterval(sampler);
     // Then until the queue is empty, so late turns are counted rather than lost.
     const deadline = Date.now() + 90000;
     while (Date.now() < deadline) {
@@ -240,7 +297,7 @@ export class Session {
     }
     await this.stop();
     await this.waitStatus(/^Detenido\./, { timeoutMs: 120000, since: t0 }).catch((e) => log(`  ${e.message}`));
-    return { t0, events: this.events.slice(), console: this.console.slice() };
+    return { t0, events: this.events.slice(), console: this.console.slice(), samples };
   }
 
   async close() { await this.chrome.close(); }
@@ -333,6 +390,46 @@ export function analyse({ t0, events }, manifest, { speaker = 'me' } = {}) {
   const errors = events.filter((e) => e.type === 'STATUS' && e.kind === 'error').map((e) => e.text);
   const maxPending = Math.max(0, ...events.filter((e) => e.type === 'QUEUE').map((e) => e.pending || 0));
   return { rows, previews: partials.filter((p) => (p.text || '').trim()).length, maxPending, errors };
+}
+
+// Stretches, while a sentence was being spoken, during which the speaker's live
+// line showed nothing. Grace is what a healthy lane needs to paint its first
+// words after a cut; only longer holes count. Works on the protocol log (PARTIAL
+// messages, `text`) and on the painted samples (`en`) alike: pass a reader.
+export function blankSpans(points, manifest, { grace = 2500 } = {}) {
+  const out = [];
+  for (const cue of manifest.cues) {
+    const start = cue.start * 1000;
+    const end = cue.end * 1000;
+    let blankSince = start;
+    let shown = false;
+    for (const p of points) {
+      if (p.t < start) { shown = !!p.text; blankSince = start; continue; }
+      if (p.t > end) break;
+      if (p.text) {
+        if (!shown && p.t - blankSince > grace) out.push({ key: cue.key, from: blankSince, to: p.t });
+        shown = true;
+      } else if (shown) {
+        shown = false;
+        blankSince = p.t;
+      }
+    }
+    if (!shown && end - blankSince > grace) out.push({ key: cue.key, from: blankSince, to: end, open: true });
+  }
+  return out.map((s) => ({ ...s, from: Math.round(s.from), to: Math.round(s.to), ms: Math.round(s.to - s.from) }));
+}
+
+export function liveReport({ t0, events, samples = [] }, manifest, speaker) {
+  const sent = events.filter((e) => e.type === 'PARTIAL' && e.speaker === speaker)
+    .map((e) => ({ t: e.t - t0, text: (e.text || '').trim() }));
+  const painted = samples.map((s) => ({ t: s.t - t0, text: s[speaker].hidden ? '' : s[speaker].en.trim() }));
+  const translated = samples.filter((s) => speaker === 'them' && !s.them.hidden && s.them.es.trim()).length;
+  return {
+    sentBlank: blankSpans(sent, manifest),
+    paintedBlank: blankSpans(painted, manifest),
+    paintedSamples: painted.filter((p) => p.text).length,
+    translatedSamples: translated,
+  };
 }
 
 export function saveResult(name, data) {

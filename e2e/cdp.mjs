@@ -104,8 +104,10 @@ export class Chrome {
     return sessionId;
   }
 
-  async evaluate(sessionId, expression, { awaitPromise = true } = {}) {
-    const r = await this.send('Runtime.evaluate', { expression, awaitPromise, returnByValue: true }, sessionId);
+  // userGesture: the built-in AI and speech packs only download behind a user
+  // activation, which the protocol can grant a script.
+  async evaluate(sessionId, expression, { awaitPromise = true, userGesture = false } = {}) {
+    const r = await this.send('Runtime.evaluate', { expression, awaitPromise, returnByValue: true, userGesture }, sessionId);
     if (r.exceptionDetails) {
       const d = r.exceptionDetails;
       throw new Error(`evaluate: ${d.exception?.description || d.text}`);

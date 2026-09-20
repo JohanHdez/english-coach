@@ -154,7 +154,15 @@ long the live line and the bubble took:
 node e2e/run.mjs english                 # one speaker, local engine (first run downloads the model)
 node e2e/run.mjs bilingual --lang=multi  # alternating languages
 node e2e/run.mjs english --engine=api    # Groq stand-in on localhost: no key, no audio leaves
+node e2e/run.mjs monologue30 --lanes=2   # the other speaker, half a minute without a pause
 ```
+
+With `--lanes=2` the other speaker's lane runs too, and the harness installs the on-device
+Web Speech pack into its throwaway profile first, so that lane is measured with the same
+word-by-word recogniser a real install has — the Whisper preview lane alone hid the bug
+that blanked the line at the first forced cut. The run reports every stretch longer than
+2.5 s in which the live line was empty while a sentence was being spoken, both as sent
+(PARTIAL) and as painted in the side panel.
 
 It covers device lanes only: Chrome grants tab audio on a user invocation alone, so the tab
 lane stays a manual check. It needs no dependencies (Node 22+, `say`, `afconvert`) and nothing
@@ -175,8 +183,11 @@ Skills: `/preflight`, `/add-provider`, `/release`.
 
 ## Known debt
 
-- `capture.js` and `report.js` are written to be testable but have no tests; the 127 that exist
-  live in `coach`, `segmenter`, `worker`, `phrasebook`, `stitch`, `queue` and `langid`.
+- `capture.js` and `report.js` are written to be testable but have no tests; the 142 that exist
+  live in `coach`, `segmenter`, `worker`, `phrasebook`, `stitch`, `queue`, `langid` and `live`.
+- The built-in Translator cannot be created in the harness's throwaway profile
+  (`NotSupportedError` from `Translator.create`), so `--translate` measures the live line
+  with the Spanish under it missing; what translation costs the painted line is unmeasured.
 - `worker.js`'s native language detection rests on vendored internals of transformers.js
   (`_prepare_generation_config`, `_prepare_encoder_decoder_kwargs_for_generation`, a writable
   `forward_params`). A `vendor/` refresh can silently cost two extra encoder passes or break the

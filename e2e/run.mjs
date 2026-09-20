@@ -8,13 +8,25 @@
 //   node e2e/run.mjs english --engine=api  # Groq stand-in on localhost (no key, no audio leaves)
 //   node e2e/run.mjs english --engine=api --real   # the real Groq: GROQ_API_KEY in the environment
 //   node e2e/run.mjs english --lanes=2     # same audio on both lanes (queue stress)
+//   node e2e/run.mjs monologue30 --lanes=2 --translate   # the other speaker, half a minute, Spanish under the line
 //   flags: --headless  --device=wasm  --model=<hf id>  --delay=<mock ms>  --json
 //
 // The first run downloads the Whisper model into e2e/.profile; later runs reuse it.
 
-import { Session, settingsFor, analyse, saveResult } from './harness.mjs';
+import { Session, settingsFor, analyse, liveReport, saveResult } from './harness.mjs';
 import { startMockGroq } from './mock-groq.mjs';
 import { build } from './fixtures.mjs';
+import { readFileSync } from 'node:fs';
+
+// The repository's git-ignored .env, KEY=value per line; read only for --real and
+// never printed.
+function dotenv() {
+  try {
+    return Object.fromEntries(readFileSync(new URL('../.env', import.meta.url), 'utf8').split('\n')
+      .map((l) => l.trim()).filter((l) => l && !l.startsWith('#'))
+      .map((l) => { const i = l.indexOf('='); return [l.slice(0, i).trim(), l.slice(i + 1).trim().replace(/^["']|["']$/g, '')]; }));
+  } catch { return {}; }
+}
 
 const args = process.argv.slice(2);
 const fixture = args.find((a) => !a.startsWith('--')) || 'english';
@@ -28,9 +40,9 @@ const real = flag('real', false) === true;
 let groqKey = '';
 let mock = null;
 if (engine === 'api' && real) {
-  groqKey = process.env.GROQ_API_KEY || '';
+  groqKey = process.env.GROQ_API_KEY || process.env.APIKEY_GROQ || dotenv().APIKEY_GROQ || dotenv().GROQ_API_KEY || '';
   if (!groqKey) {
-    console.error('GROQ_API_KEY is not set; --real needs it (it is written only into e2e/.profile).');
+    console.error('no Groq key: --real reads GROQ_API_KEY or APIKEY_GROQ from the environment or from .env (the key is written only into e2e/.profile).');
     process.exit(2);
   }
 } else if (engine === 'api') {
@@ -47,6 +59,7 @@ const settings = settingsFor({
   device: flag('device', 'webgpu'),
 });
 if (mock) settings.groqBase = mock.url;
+if (flag('translate', false) === true) settings.translate = true;
 const log = (s) => console.error(s);
 
 const session = await Session.open({ fixture, headless: flag('headless', false) === true, settings, log });
@@ -62,7 +75,11 @@ try {
   if (mock) await mock.close();
 }
 
-const report = analyse(result, session.manifest);
+// With two lanes the other speaker is the one with Web Speech and a translation
+// under the line, so that is the lane the report follows.
+const speaker = Number(flag('lanes', 1)) === 2 ? 'them' : 'me';
+const report = analyse(result, session.manifest, { speaker });
+report.live = liveReport(result, session.manifest, speaker);
 if (mock) report.groq = mock.requests.map((r) => ({ ...r, at: r.at - result.t0 }));
 const file = saveResult(`${fixture}-${engine}${mock ? '-mock' : ''}`, { fixture, settings: { ...settings, groqKey: settings.groqKey ? '<set>' : '' }, device: session.device, ...result, report });
 
@@ -79,6 +96,9 @@ if (flag('json', false) === true) {
     console.log('\nGroq stand-in saw:');
     for (const q of report.groq) console.log(`  #${q.n} at ${(q.at / 1000).toFixed(2)}s · ${q.seconds}s of audio · language=${q.language ?? '(omitted)'} · ${q.format} · answered as ${q.cue}`);
   }
+  const spans = (list) => (list.length ? list.map((s) => `${s.key} ${(s.from / 1000).toFixed(1)}–${(s.to / 1000).toFixed(1)}s (${(s.ms / 1000).toFixed(1)}s${s.open ? ', never came back' : ''})`).join(', ') : 'none');
+  console.log(`\nlive line of ${speaker} while speaking · blank >2.5s as sent: ${spans(report.live.sentBlank)}`);
+  console.log(`live line of ${speaker} while speaking · blank >2.5s as painted: ${spans(report.live.paintedBlank)} · painted samples ${report.live.paintedSamples}, with Spanish ${report.live.translatedSamples}`);
   if (report.errors.length) console.log('\nerrors:\n  ' + report.errors.join('\n  '));
   const noise = result.console.filter((c) => c.level === 'error' || c.level === 'exception');
   if (noise.length) console.log('\nconsole errors:\n  ' + noise.map((c) => `${c.where}: ${c.text}`).join('\n  '));
