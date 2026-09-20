@@ -175,9 +175,16 @@ Skills: `/preflight`, `/add-provider`, `/release`.
 
 ## Known debt
 
-- `picker.js` and `picker.html` are unreachable and the `desktopCapture` permission they needed
-  is still requested. Preflight reports both.
-- `host_permissions` covers every site; only `huggingface.co`, `api.groq.com` and
-  `api.anthropic.com` are actually fetched.
-- `capture.js` and `report.js` are written to be testable but have no tests; `coach.js`,
-  `segmenter.js`, `worker.js` and `phrasebook.js` carry the 59 that exist.
+- `capture.js` and `report.js` are written to be testable but have no tests; the 127 that exist
+  live in `coach`, `segmenter`, `worker`, `phrasebook`, `stitch`, `queue` and `langid`.
+- `worker.js`'s native language detection rests on vendored internals of transformers.js
+  (`_prepare_generation_config`, `_prepare_encoder_decoder_kwargs_for_generation`, a writable
+  `forward_params`). A `vendor/` refresh can silently cost two extra encoder passes or break the
+  path — it then falls back to the pipeline, warned once — and nothing static can see it; only
+  `node e2e/run.mjs bilingual --lang=multi` does.
+- A preview's one-token language probe has no confidence gate; a half-word preview can move a
+  speaker's language for one pass.
+- `PREVIEW_TAIL_MS` equals `MAX_SEG_MS` (8 s), so the preview tail cap is unreachable while a
+  phrase never dips; the two constants are independent by intent and coincide by value.
+- The end-to-end harness cannot drive the tab lane (`tabCapture` needs a user invocation); that
+  lane stays a manual check.
