@@ -155,6 +155,7 @@ node e2e/run.mjs english                 # one speaker, local engine (first run 
 node e2e/run.mjs bilingual --lang=multi  # alternating languages
 node e2e/run.mjs english --engine=api    # Groq stand-in on localhost: no key, no audio leaves
 node e2e/run.mjs monologue30 --lanes=2   # the other speaker, half a minute without a pause
+node e2e/run.mjs talk30 --lanes=2 --only-them --translate   # the same half minute in sentences: where bubbles close
 ```
 
 With `--lanes=2` the other speaker's lane runs too, and the harness installs the on-device
@@ -186,9 +187,9 @@ Skills: `/preflight`, `/add-provider`, `/release`.
 
 - `capture.js` and `report.js` are written to be testable but have no tests; the 142 that exist
   live in `coach`, `segmenter`, `worker`, `phrasebook`, `stitch`, `queue`, `langid` and `live`.
-- The built-in Translator cannot be created in the harness's throwaway profile
-  (`NotSupportedError` from `Translator.create`), so `--translate` measures the live line
-  with the Spanish under it missing; what translation costs the painted line is unmeasured.
+- The built-in Translator cannot be created in the harness's throwaway profile, so `--translate`
+  runs a stand-in that marks text `[es]` after 40 ms + 8 ms per character: it measures when
+  Spanish appears and disappears under a bubble, never what it says.
 - `worker.js`'s native language detection rests on vendored internals of transformers.js
   (`_prepare_generation_config`, `_prepare_encoder_decoder_kwargs_for_generation`, a writable
   `forward_params`). A `vendor/` refresh can silently cost two extra encoder passes or break the

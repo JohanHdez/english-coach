@@ -103,6 +103,8 @@ if (flag('json', false) === true) {
   console.log(`live line of ${speaker} while speaking · blank >2.5s as painted: ${spans(report.live.paintedBlank)} · painted samples ${report.live.paintedSamples}, with Spanish ${report.live.translatedSamples}`);
   const b = report.bubbles;
   console.log(`bubbles of ${speaker}: ${b.count} · longest ${b.longestChars} chars · largest repaint ${b.largestRepaintChars} chars · closed at a sentence end ${b.closedAtSentenceEnd}/${b.closed}`);
+  const sp = report.live.spanish;
+  if (sp) console.log(`Spanish under ${speaker}'s bubbles: closed with Spanish ${sp.closedWithSpanish}/${sp.closed} · repaints ${sp.repaints}, of which blanked the Spanish ${sp.repaintsBlankingSpanish} · longest text translated at once ${sp.maxTranslatedChars} chars`);
   if (report.errors.length) console.log('\nerrors:\n  ' + report.errors.join('\n  '));
   const noise = result.console.filter((c) => c.level === 'error' || c.level === 'exception');
   if (noise.length) console.log('\nconsole errors:\n  ' + noise.map((c) => `${c.where}: ${c.text}`).join('\n  '));

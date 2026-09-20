@@ -182,13 +182,28 @@ export class Session {
     }
     if (this.settings.translate) {
       wants.push(`(async () => {
-        if (typeof Translator === 'undefined') return 'translator: unsupported';
+        const stub = () => {
+          globalThis.Translator = {
+            availability: async () => 'available',
+            create: async () => ({
+              translate: async (text) => {
+                await new Promise((r) => setTimeout(r, 40 + text.length * 8));
+                return '[es] ' + text;
+              },
+            }),
+          };
+          return 'translator: stand-in (marks text, 40 ms + 8 ms per character)';
+        };
+        if (typeof Translator === 'undefined') return stub();
         const opts = { sourceLanguage: 'en', targetLanguage: 'es' };
-        const before = await Translator.availability(opts);
-        if (before === 'unavailable') return 'translator: unavailable';
-        const t = await Translator.create(opts);
-        const sample = await t.translate('Give me a second.');
-        return 'translator: ' + before + ' → ready (' + sample + ')';
+        try {
+          if ((await Translator.availability(opts)) === 'unavailable') return stub();
+          const t = await Translator.create(opts);
+          const sample = await t.translate('Give me a second.');
+          return 'translator: real (' + sample + ')';
+        } catch (e) {
+          return stub() + ' — the real one failed: ' + e.message;
+        }
       })()`);
     }
     // A pack that will not install is reported, not fatal: the run then measures
@@ -278,7 +293,12 @@ export class Session {
       return { t: Date.now(),
         them: { hidden: hidden('partialThem'), en: t('partialThemEn') + t('partialThemTail'), es: t('partialThemEs') },
         me: { hidden: hidden('partialMe'), en: t('partialMeEn') + t('partialMeTail') },
-        bubbles: document.querySelectorAll('#transcript .bubble').length };
+        bubbles: document.querySelectorAll('#transcript .bubble').length,
+        bubbleList: [...document.querySelectorAll('#transcript .bubble')].map((b) => {
+          const es = b.querySelector('.es');
+          return { key: b.dataset.key, len: (b.querySelector('span:not(.meta):not(.es):not(.lang-tag)') || {}).textContent?.length || 0,
+            es: es ? es.textContent.length : 0, stale: !!(es && es.classList.contains('stale')) };
+        }) };
     })()`);
   }
 
@@ -450,12 +470,41 @@ export function liveReport({ t0, events, samples = [] }, manifest, speaker) {
     .map((e) => ({ t: e.t - t0, text: (e.text || '').trim() }));
   const painted = samples.map((s) => ({ t: s.t - t0, text: s[speaker].hidden ? '' : s[speaker].en.trim() }));
   const translated = samples.filter((s) => speaker === 'them' && !s.them.hidden && s.them.es.trim()).length;
-  return {
+  const out = {
     sentBlank: blankSpans(sent, manifest),
     paintedBlank: blankSpans(painted, manifest),
     paintedSamples: painted.filter((p) => p.text).length,
     translatedSamples: translated,
   };
+  if (speaker === 'them') {
+    // Per bubble, across samples: did its text ever change with no Spanish under it,
+    // and did it end with Spanish. The last bubble is the open one and is not judged.
+    const seen = new Map();
+    let repaints = 0;
+    let repaintsBlankingSpanish = 0;
+    let maxTranslatedChars = 0;
+    for (const s of samples) {
+      for (const b of s.bubbleList || []) {
+        const prev = seen.get(b.key);
+        if (prev && prev.len !== b.len) {
+          repaints++;
+          if (!b.es) repaintsBlankingSpanish++;
+        }
+        if (b.es && !b.stale) maxTranslatedChars = Math.max(maxTranslatedChars, b.len);
+        seen.set(b.key, b);
+      }
+    }
+    const finals = [...seen.values()];
+    const closedList = finals.slice(0, -1);
+    out.spanish = {
+      closed: closedList.length,
+      closedWithSpanish: closedList.filter((b) => b.es && !b.stale).length,
+      repaints,
+      repaintsBlankingSpanish,
+      maxTranslatedChars,
+    };
+  }
+  return out;
 }
 
 export function saveResult(name, data) {
