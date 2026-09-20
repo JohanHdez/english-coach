@@ -305,7 +305,9 @@ silence, so thinking pauses split a thought and long monologues stream out in ~4
 Since v1.15.1 consecutive segments of the same speaker close in time fold back into one turn on
 screen and in the transcript, and the translation is redone over the merged thought. The
 segments still arrive one by one — that is the streaming working — they just extend the same
-block instead of stacking.
+block instead of stacking. Since v1.23.0 a block that has reached the end of a sentence closes
+there and the next words open a new one, so what keeps changing under your eyes is only the
+sentence still being said.
 
 **The English of what the other person says only shows up several seconds after they said it.**
 Fixed in v1.18.0. The live line came only from Chrome's on-device speech recognition, and when
@@ -426,6 +428,15 @@ what the bubble already holds. Measured on a 34 s monologue: the line was blank 
 the end before, and never for more than 2.5 s after. Translation was not involved: the same
 blackout happened with it off.
 
+**During a long monologue the whole bubble kept growing, its Spanish vanished at every new
+piece and came back seconds later, and the reader lost their place.** Changed in v1.23.0. A
+bubble that grows by folding now closes at its last finished sentence and a new bubble opens
+for what follows, so a finished idea stays put with its translation and only a short open
+bubble keeps changing; while it changes, the previous Spanish stays under it, dimmed, until the
+new translation lands. The 400-character cap still bounds a bubble in which no sentence ever
+ends. Measured on a 30 s monologue in sentences: four bubbles, every closed one ending at a full
+stop, the largest text retranslated at once 241 characters instead of the whole block.
+
 ## Known limits
 
 - The VAD is energy-based: in very noisy places it may cut too aggressively. Tune `SILENCE_MS`,
@@ -434,6 +445,10 @@ blackout happened with it off.
   capitalise and full-stop each one: a single flowing sentence may appear as two or
   three fragments in the transcript. That is the deliberate trade for seeing the text
   while the person is still talking. A stretch with no breath dip at all is cut every 8 s.
+- A bubble closes at a full stop, question or exclamation mark followed by a capital letter (or
+  «¿» / «¡»). Whisper sometimes writes the next word in lower case after a full stop, and then
+  the bubble simply keeps growing to the next one; an abbreviation such as «Mr.» before a name
+  can close one a sentence early.
 - In a bilingual session the language is decided per piece by the engine itself (Groq's label,
   or Whisper's own first token on the local engine). A one-word turn or a name can read as either
   language, and the first provisional pass over a new phrase can guess wrong for a second before
