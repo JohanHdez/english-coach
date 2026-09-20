@@ -258,21 +258,24 @@ export function sentenceCut(text) {
 export function foldIntoTranscript(transcript, entry, gapMs = MERGE_GAP_MS, maxChars = MERGE_MAX_CHARS) {
   let last = null;
   for (const e of transcript) if (!last || e.t > last.t) last = e;
-  const fits = last && last.speaker === entry.speaker
+  const follows = last && last.speaker === entry.speaker
     && entry.t >= last.t
     // One bubble carries one language, because it carries one translation. An entry
     // with no lang predates the field and matches anything, so an old transcript
     // folds exactly as it used to.
     && (!last.lang || !entry.lang || last.lang === entry.lang)
-    && entry.t - (last.t + last.dur * 1000) <= gapMs
-    && last.text.length + entry.text.length < maxChars;
-  if (!fits) {
+    && entry.t - (last.t + last.dur * 1000) <= gapMs;
+  const merged = follows ? `${last.text} ${entry.text}`.trim() : '';
+  const cut = follows ? sentenceCut(merged) : -1;
+  // The cap bounds a bubble that never finishes a sentence. A finished sentence
+  // closes the bubble whatever its length: an 8 s piece of a fast speaker is
+  // 150–200 characters, and a cap applied first refused every fold and left the
+  // cut with nothing to do.
+  if (!follows || (cut < 0 && last.text.length + entry.text.length >= maxChars)) {
     transcript.push(entry);
     return [entry];
   }
   const before = last.text;
-  const merged = `${last.text} ${entry.text}`.trim();
-  const cut = sentenceCut(merged);
   if (cut < 0) {
     last.text = merged;
     last.dur = Math.round((entry.t + entry.dur * 1000 - last.t) / 100) / 10;

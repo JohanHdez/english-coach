@@ -167,6 +167,15 @@ test('a merged turn stops growing at the character cap', () => {
   assert.equal(tr.length, 2);
 });
 
+test('the cap does not stop a cut at a finished sentence', () => {
+  const tr = [{ speaker: 'them', text: 'a'.repeat(390), t: 1000, dur: 8, lang: 'en' }];
+  const shown = foldIntoTranscript(tr, { speaker: 'them', text: 'and ends here. Next idea', t: 9000, dur: 8, lang: 'en' });
+  assert.equal(tr.length, 2);
+  assert.equal(tr[0].text, 'a'.repeat(390) + ' and ends here.');
+  assert.equal(tr[1].text, 'Next idea');
+  assert.deepEqual(shown, [tr[0], tr[1]]);
+});
+
 test('consecutive turns in different languages do not fold', () => {
   // The tab track carries every remote participant, so English and Spanish
   // alternate on one speaker. Folded, they would share a bubble and a single
