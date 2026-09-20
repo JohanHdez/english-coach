@@ -509,6 +509,7 @@ export function liveReport({ t0, events, samples = [] }, manifest, speaker) {
     let maxTranslatedChars = 0;
     for (const s of samples) {
       for (const b of s.bubbleList || []) {
+        if (!b.key || !b.key.startsWith(speaker + ':')) continue;
         const prev = seen.get(b.key);
         if (prev && prev.len !== b.len) {
           repaints++;
