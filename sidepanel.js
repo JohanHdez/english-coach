@@ -145,16 +145,21 @@ function bubbleNode(e) {
     div.append(es);
     // Cached on the entry, not the node: a fold replaces the node.
     if (e.es) es.textContent = e.es;
-    else toSpanish(e.text).then((txt) => {
-      if (!txt) return;
-      e.es = txt;
-      es.textContent = txt;
-      // The translation lands after the bubble was painted and makes it taller.
-      // Without this the newest line sits half out of sight the moment it arrives.
-      stickToBottom();
-      // The sticky card is a copy of this turn: it needs the Spanish too.
-      if (stickyKey === e.speaker + ':' + e.t) renderSticky();
-    });
+    else {
+      if (e.esStale) { es.textContent = e.esStale; es.classList.add('stale'); }
+      toSpanish(e.text).then((txt) => {
+        if (!txt) return;
+        e.es = txt;
+        delete e.esStale;
+        es.textContent = txt;
+        es.classList.remove('stale');
+        // The translation lands after the bubble was painted and makes it taller.
+        // Without this the newest line sits half out of sight the moment it arrives.
+        stickToBottom();
+        // The sticky card is a copy of this turn: it needs the Spanish too.
+        if (stickyKey === e.speaker + ':' + e.t) renderSticky();
+      });
+    }
   }
   return div;
 }
@@ -192,6 +197,12 @@ function insertByTime(node, t) {
 function addEntry(entry) {
   const i = entries.findIndex((e) => e.t === entry.t && e.speaker === entry.speaker);
   const isNew = i < 0;
+  // A bubble re-sent with the same words keeps its translation; one whose words
+  // changed is retranslated, but shows the old Spanish until the new one lands
+  // rather than a blank line under text the reader is in the middle of.
+  const prev = isNew ? null : entries[i];
+  if (prev && prev.text === entry.text) entry.es = prev.es;
+  else if (prev && prev.es) entry.esStale = prev.es;
   if (isNew) entries.push(entry); else entries[i] = entry;
 
   const empty = els.transcript.querySelector('.empty');

@@ -248,6 +248,7 @@ footer { border-top: 1px solid var(--border); padding: 10px 12px; display: flex;
 footer .row { display: flex; gap: 6px; }
 footer .row button { flex: 1; }
 .bubble .es { display: block; color: var(--muted); font-size: 11px; font-style: italic; margin-top: 3px; }
+.bubble .es.stale { opacity: .6; }
 
 .partial {
   margin: 0 12px 8px; padding: 7px 10px; border-radius: 10px; max-width: 92%;

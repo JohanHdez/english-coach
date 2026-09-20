@@ -280,6 +280,7 @@
       border-radius: 3px; border: 1px solid #3a4048; color: #9aa0a6;
     }
     .turn .es { display: block; color: #9aa0a6; font-size: 11px; font-style: italic; margin-top: 3px; }
+    .turn .es.stale { opacity: .6; }
     /* No blanket opacity: the dashed border already says provisional, and dimming
        the box on top of dimming the unsettled tail left a fresh phrase — which has
        nothing settled yet — barely readable. */
@@ -598,17 +599,22 @@
       es.className = 'es';
       div.append(es);
       if (t.es) es.textContent = t.es;
-      else toSpanish(t.text).then((txt) => {
-        if (!txt) return;
-        // Cached on the turn, not the node: the node can be replaced by a fold.
-        t.es = txt;
-        es.textContent = txt;
-        // The translation lands after the turn was painted and makes it taller. Without
-        // this the newest line is left scrolled half out of sight the moment it arrives.
-        stickToBottom();
-        // The sticky card is a copy of this turn: it needs the Spanish too.
-        if (stickyKey === t.speaker + ':' + t.t) renderSticky();
-      });
+      else {
+        if (t.esStale) { es.textContent = t.esStale; es.classList.add('stale'); }
+        toSpanish(t.text).then((txt) => {
+          if (!txt) return;
+          // Cached on the turn, not the node: the node can be replaced by a fold.
+          t.es = txt;
+          delete t.esStale;
+          es.textContent = txt;
+          es.classList.remove('stale');
+          // The translation lands after the turn was painted and makes it taller. Without
+          // this the newest line is left scrolled half out of sight the moment it arrives.
+          stickToBottom();
+          // The sticky card is a copy of this turn: it needs the Spanish too.
+          if (stickyKey === t.speaker + ':' + t.t) renderSticky();
+        });
+      }
     }
     return div;
   }
@@ -627,8 +633,11 @@
   function addTurn(entry) {
     const i = turns.findIndex((x) => x.t === entry.t && x.speaker === entry.speaker);
     const isNew = i < 0;
-    // A repeated (speaker, t) is a turn that grew by folding: replace it. The fresh
-    // object has no cached `es`, so the merged text is retranslated whole.
+    // A turn re-sent with the same words keeps its translation; one whose words
+    // changed is retranslated and shows the old Spanish until the new one lands.
+    const prev = isNew ? null : turns[i];
+    if (prev && prev.text === entry.text) entry.es = prev.es;
+    else if (prev && prev.es) entry.esStale = prev.es;
     if (isNew) turns.push(entry); else turns[i] = entry;
 
     const box = $('.turns');
