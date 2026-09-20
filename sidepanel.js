@@ -711,6 +711,20 @@ els.clear.addEventListener('click', async () => {
   setStatus('Transcripción borrada.');
 });
 
+// The profile and context fields are a copy of a value Options can also write:
+// without this, saveUi() would read the fresh value out of storage only to
+// overwrite it with whatever this page loaded last.
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== 'local' || !changes.settings) return;
+  const next = changes.settings.newValue || {};
+  for (const [field, key] of [[els.profile, 'profile'], [els.sessionContext, 'sessionContext']]) {
+    const value = next[key] || '';
+    if (document.activeElement === field || field.value === value) continue;
+    field.value = value;
+    settings[key] = value;
+  }
+});
+
 chrome.runtime.onMessage.addListener((msg) => {
   if (msg.target !== 'ui') return;
   // A repeated (speaker, t) is a turn extended by folding: addEntry replaces it,
