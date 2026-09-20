@@ -195,11 +195,27 @@ const clip = (text, max) => {
   return t.length <= max ? t : `${t.slice(0, max)}…`;
 };
 
+// Consecutive turns by one speaker in one language read as a single turn: a
+// monologue arrives as several sentence bubbles, and counting each against the
+// limit would push the other speaker's last words out of the window.
+function runsOf(turns) {
+  const runs = [];
+  for (const t of turns) {
+    const last = runs[runs.length - 1];
+    if (last && last.speaker === t.speaker && (last.lang || null) === (t.lang || null)) {
+      last.text = `${last.text} ${t.text}`.trim();
+    } else {
+      runs.push({ speaker: t.speaker, lang: t.lang, text: String(t.text ?? '') });
+    }
+  }
+  return runs;
+}
+
 // A turn is labelled with its language when that language is not the session's own,
 // or the session mixes both ('multi' has no single language to leave unlabelled).
 // An entry with no lang (recorded before the field existed) gets no label either way.
 export function turnsToText(turns, limit = 10, maxChars = Infinity, maxTurnChars = Infinity, sessionLang = 'en') {
-  const lines = turns
+  const lines = runsOf(turns)
     .slice(-limit)
     .map((t) => {
       const tag = t.lang && (t.lang !== sessionLang || sessionLang === 'multi') ? ` [${t.lang}]` : '';

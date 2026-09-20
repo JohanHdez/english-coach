@@ -293,3 +293,24 @@ test('askReport marks the transcript partial when a turn is clipped, even if non
   assert.ok(!user.includes('Transcripción completa'), 'a clipped turn is reported as a complete transcript');
   assert.ok(user.includes('sólo la parte final de la conversación'), 'a clipped turn should mark the transcript as partial');
 });
+
+test('turnsToText counts a run of same-speaker bubbles as one turn', () => {
+  // A monologue split into sentence bubbles must not push the learner's own
+  // question out of the window.
+  const turns = [
+    { speaker: 'me', text: 'How did the rollout go?', t: 0, dur: 2, lang: 'en' },
+    { speaker: 'them', text: 'It went fine.', t: 3000, dur: 3, lang: 'en' },
+    { speaker: 'them', text: 'The hardest part was the timezone.', t: 6000, dur: 3, lang: 'en' },
+    { speaker: 'them', text: 'We fixed it by Friday.', t: 9000, dur: 3, lang: 'en' },
+  ];
+  const text = turnsToText(turns, 2);
+  assert.equal(text, 'LEARNER: How did the rollout go?\nOTHER: It went fine. The hardest part was the timezone. We fixed it by Friday.');
+});
+
+test('turnsToText keeps runs apart across a language change', () => {
+  const turns = [
+    { speaker: 'them', text: 'We can ship on Friday.', t: 0, dur: 2, lang: 'en' },
+    { speaker: 'them', text: 'Perdón, ¿el viernes?', t: 3000, dur: 2, lang: 'es' },
+  ];
+  assert.equal(turnsToText(turns, 10, Infinity, Infinity, 'multi'), 'OTHER [en]: We can ship on Friday.\nOTHER [es]: Perdón, ¿el viernes?');
+});
