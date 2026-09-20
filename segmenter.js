@@ -55,6 +55,10 @@ export class Segmenter {
     this.voicedCount = 0;
     this.silence = 0;
     this.active = false;
+    // Whether the current piece continues a phrase a cut split, rather than
+    // starting at a real onset. The minimum-length rules exist for stray sounds
+    // between phrases; the tail of a phrase the segmenter itself cut is speech.
+    this.continued = false;
     this.startedAt = 0;
   }
 
@@ -78,6 +82,7 @@ export class Segmenter {
         this.pre = [];
         this.voicedCount = 1;
         this.silence = 0;
+        this.continued = false;
         this.startedAt = this.now() - this.chunks.length * CHUNK_MS;
       }
       return;
@@ -134,6 +139,7 @@ export class Segmenter {
     const chunks = this.chunks;
     const startedAt = this.startedAt;
     const voiced = this.voicedCount;
+    const continued = this.continued;
     this.chunks = [];
     this.voicedCount = 0;
     // Each piece previews on its own: the next one starts from nothing and is due
@@ -144,13 +150,15 @@ export class Segmenter {
       // a dip that turns into a real pause still closes (the near-empty stub is
       // then discarded by the minimum-length rules).
       this.startedAt = this.now();
+      this.continued = true;
     } else {
       this.active = false;
       this.pre = [];
       this.silence = 0;
+      this.continued = false;
     }
 
-    if (durationMs < this.minSegMs || voiced < this.minVoiced) return;
+    if (continued ? voiced === 0 : (durationMs < this.minSegMs || voiced < this.minVoiced)) return;
 
     // `open`: the speaker had not paused — the cut was soft or forced, and more of
     // the same phrase is on its way. The consumer must not treat it as an ending.

@@ -100,6 +100,23 @@ test('short noises are still discarded', () => {
   assert.equal(segs.length, 0);
 });
 
+test('the words after a forced cut are emitted, however few', () => {
+  // Enough voice for exactly one forced cut, then MIN_VOICED - 1 more blocks of
+  // speech before a real pause: the tail is short, but it is the end of a phrase
+  // the segmenter itself cut, not a stray sound.
+  const blocks = MAX_SEG_MS / CHUNK_MS - PREROLL + (MIN_VOICED - 1);
+  const segs = run([[VOICE, blocks], [QUIET, 12]]);
+  assert.equal(segs.length, 2, `expected the cut piece and its tail, got ${segs.length}`);
+  assert.equal(segs[0].open, true);
+  assert.equal(segs[1].open, false);
+  assert.ok(segs[1].durationMs > 0);
+});
+
+test('a lone blip between phrases is still discarded', () => {
+  const segs = run([[VOICE, MIN_VOICED - 1], [QUIET, 12]]);
+  assert.equal(segs.length, 0);
+});
+
 test('flush leaves no state behind for the next phrase', () => {
   const out = [];
   let t = 0;
