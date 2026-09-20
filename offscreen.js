@@ -118,11 +118,12 @@ function broadcastLiveState(kind, extra = {}) {
 async function appendTranscript(entry) {
   const { transcript = [] } = (await store.get('transcript')) || {};
   // The broadcast carries the folded turn: its `t` repeats when a turn was
-  // extended, and the UIs upsert by (speaker, t) instead of appending.
+  // extended, and the UIs upsert by (speaker, t) instead of appending. A fold
+  // cut at a sentence end paints two: the closed bubble and the opened one.
   const shown = foldIntoTranscript(transcript, entry);
   state.turns = transcript;
   await store.set({ transcript });
-  broadcast({ type: 'SEGMENT', entry: shown });
+  for (const e of shown) broadcast({ type: 'SEGMENT', entry: e });
 }
 
 // The phrase ended: blank that speaker's live line. Only then — on a mid-speech

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  Segmenter, isJunk, floatToWav, foldIntoTranscript,
+  Segmenter, isJunk, floatToWav, foldIntoTranscript, sentenceCut,
   CHUNK_MS, SILENCE_MS, MAX_SEG_MS, SOFT_CUT_MS, SOFT_SILENCE_MS, MIN_VOICED, PREROLL,
   MERGE_GAP_MS, MERGE_MAX_CHARS, PREVIEW_EVERY_MS, PREVIEW_MIN_MS, SR,
 } from './segmenter.js';
@@ -149,7 +149,7 @@ test('same-speaker entries within the merge gap fold into one turn', () => {
   const shown = foldIntoTranscript(tr, { speaker: 'me', text: 'fluency in English.', t: 4500, dur: 1.5 });
   assert.equal(tr.length, 1);
   assert.equal(tr[0].text, 'I think I need more fluency in English.');
-  assert.equal(shown, tr[0]);
+  assert.deepEqual(shown, [tr[0]]);
   assert.equal(tr[0].dur, 5);
 });
 
@@ -181,7 +181,7 @@ test('consecutive turns in the same language still fold', () => {
   const shown = foldIntoTranscript(tr, { speaker: 'them', text: 'on Friday.', t: 4000, dur: 1, lang: 'en' });
   assert.equal(tr.length, 1);
   assert.equal(tr[0].text, 'We can ship on Friday.');
-  assert.equal(shown, tr[0]);
+  assert.deepEqual(shown, [tr[0]]);
 });
 
 test('a transcript written before languages existed folds exactly as it did', () => {
@@ -446,4 +446,81 @@ test('a speaker who never dips streams out in pieces of at most eight seconds', 
   assert.ok(segs.length >= 3, `expected forced cuts every eight seconds, got ${segs.length} pieces`);
   for (const s of segs) assert.ok(s.durationMs <= 8000, `a piece lasted ${s.durationMs} ms`);
   for (const s of segs.slice(0, -1)) assert.ok(s.open, 'a forced cut is an open cut');
+});
+
+test('sentenceCut finds the tail after the last sentence end', () => {
+  assert.equal(sentenceCut('Fine. Go ahead'), 6);
+  assert.equal(sentenceCut('Really? Yes. Go ahead'), 13);
+  assert.equal(sentenceCut('He said "done." Then left'), 16);
+  assert.equal(sentenceCut('Claro. ¿Y el viernes?'), 7);
+  assert.equal(sentenceCut('Wait… Okay'), 6);
+});
+
+test('sentenceCut ignores decimals, lowercase continuations and a trailing full stop', () => {
+  assert.equal(sentenceCut('it costs 1.5 million'), -1);
+  assert.equal(sentenceCut('fine. go ahead'), -1);
+  assert.equal(sentenceCut('That is the whole project.'), -1);
+  assert.equal(sentenceCut(''), -1);
+});
+
+test('a fold with a sentence end inside the new piece closes the bubble there and opens a new one', () => {
+  const tr = [{ speaker: 'them', text: 'and I love that you are treating me like a crash test dummy', t: 1000, dur: 8, lang: 'en' }];
+  const shown = foldIntoTranscript(tr, { speaker: 'them', text: 'for your project. Go ahead and put that engine', t: 9000, dur: 8, lang: 'en' });
+  assert.equal(tr.length, 2);
+  assert.equal(tr[0].text, 'and I love that you are treating me like a crash test dummy for your project.');
+  assert.equal(tr[0].t, 1000);
+  assert.equal(tr[0].dur, 8);
+  assert.equal(tr[1].text, 'Go ahead and put that engine');
+  assert.equal(tr[1].t, 9000);
+  assert.equal(tr[1].dur, 8);
+  assert.equal(tr[1].lang, 'en');
+  assert.equal(tr[1].speaker, 'them');
+  assert.deepEqual(shown, [tr[0], tr[1]]);
+});
+
+test('a bubble that already ended at a sentence end is left alone and the piece opens a new one', () => {
+  const tr = [{ speaker: 'them', text: 'We can ship on Friday.', t: 1000, dur: 3, lang: 'en' }];
+  const shown = foldIntoTranscript(tr, { speaker: 'them', text: 'Let me check the calendar', t: 4500, dur: 2, lang: 'en' });
+  assert.equal(tr.length, 2);
+  assert.equal(tr[0].text, 'We can ship on Friday.');
+  assert.equal(tr[1].text, 'Let me check the calendar');
+  assert.equal(tr[1].t, 4500);
+  assert.deepEqual(shown, [tr[1]], 'unchanged text is not re-sent');
+});
+
+test('a sentence end inside the older text also cuts on the next fold', () => {
+  // The first piece of a monologue arrives as a new turn and is not cut; the
+  // cut happens when the next piece folds into it.
+  const tr = [{ speaker: 'them', text: 'It makes me feel great. Go ahead and', t: 1000, dur: 8, lang: 'en' }];
+  const shown = foldIntoTranscript(tr, { speaker: 'them', text: 'put that engine to work', t: 9000, dur: 8, lang: 'en' });
+  assert.equal(tr.length, 2);
+  assert.equal(tr[0].text, 'It makes me feel great.');
+  assert.equal(tr[1].text, 'Go ahead and put that engine to work');
+  assert.equal(tr[1].t, 9000);
+  assert.deepEqual(shown, [tr[0], tr[1]]);
+});
+
+test('a fold with no sentence end keeps growing one bubble', () => {
+  const tr = [{ speaker: 'them', text: 'and then we moved the whole platform', t: 1000, dur: 8, lang: 'en' }];
+  const shown = foldIntoTranscript(tr, { speaker: 'them', text: 'over to the new framework while keeping', t: 9000, dur: 8, lang: 'en' });
+  assert.equal(tr.length, 1);
+  assert.equal(tr[0].text, 'and then we moved the whole platform over to the new framework while keeping');
+  assert.deepEqual(shown, [tr[0]]);
+});
+
+test('the opened bubble folds the next piece, the closed one never does', () => {
+  const tr = [{ speaker: 'them', text: 'First idea', t: 1000, dur: 8, lang: 'en' }];
+  foldIntoTranscript(tr, { speaker: 'them', text: 'ends here. Second idea', t: 9000, dur: 8, lang: 'en' });
+  const shown = foldIntoTranscript(tr, { speaker: 'them', text: 'keeps going', t: 17000, dur: 8, lang: 'en' });
+  assert.equal(tr.length, 2);
+  assert.equal(tr[0].text, 'First idea ends here.');
+  assert.equal(tr[1].text, 'Second idea keeps going');
+  assert.deepEqual(shown, [tr[1]]);
+});
+
+test('an entry pushed as a new turn is returned as the only painted entry', () => {
+  const tr = [];
+  const entry = { speaker: 'me', text: 'Hello. How are you', t: 0, dur: 2 };
+  assert.deepEqual(foldIntoTranscript(tr, entry), [entry]);
+  assert.equal(tr[0].text, 'Hello. How are you', 'a turn that never folds is not cut');
 });

@@ -227,18 +227,32 @@ export function isJunk(text) {
   return FILLERS.test(bare);
 }
 
-// The VAD cuts by silence, not by ideas: a thinking pause splits one thought into
-// two segments, and each half would be shown — and translated — on its own.
 // Consecutive entries of the same speaker within MERGE_GAP_MS fold into the
-// previous turn (until it reaches MERGE_MAX_CHARS), so an idea reads as one block
-// and its translation covers the whole thought. Soft-cut monologue pieces keep
-// streaming with low latency; folding only changes what they land in.
+// previous turn (until it reaches MERGE_MAX_CHARS). A folded turn is cut at its
+// last finished sentence: the head stays as the turn it was, closed for good, and
+// the tail opens a new turn that later pieces fold into. A bubble that keeps
+// growing is retranslated whole every time a piece lands, so this bounds what a
+// repaint costs and keeps a finished idea from moving under the reader.
 export const MERGE_GAP_MS = 7000;
 export const MERGE_MAX_CHARS = 400;
 
+// A sentence end followed by more text: the terminal mark, any closing quote or
+// bracket, whitespace, then a sentence opener. Whisper capitalises sentence starts,
+// and requiring the opener is what keeps "1.5 million" and "fine. go ahead" whole.
+const SENTENCE_END = /[.!?…]["'"')\]]*\s+(?=[A-ZÁÉÍÓÚÑ¿¡])/g;
+
+// Index where the tail after the last finished sentence begins, or -1 when the
+// text has no sentence end that leaves a tail.
+export function sentenceCut(text) {
+  let cut = -1;
+  for (const m of String(text || '').matchAll(SENTENCE_END)) cut = m.index + m[0].length;
+  return cut;
+}
+
 // Compares against the chronologically latest entry, not the last appended one:
 // the transcription queue lets 'them' overtake 'me', so append order can disagree
-// with capture order. Returns the entry the UIs should paint (merged or new).
+// with capture order. Returns the entries the UIs should paint, in order — only
+// those whose text changed.
 export function foldIntoTranscript(transcript, entry, gapMs = MERGE_GAP_MS, maxChars = MERGE_MAX_CHARS) {
   let last = null;
   for (const e of transcript) if (!last || e.t > last.t) last = e;
@@ -252,9 +266,30 @@ export function foldIntoTranscript(transcript, entry, gapMs = MERGE_GAP_MS, maxC
     && last.text.length + entry.text.length < maxChars;
   if (!fits) {
     transcript.push(entry);
-    return entry;
+    return [entry];
   }
-  last.text = `${last.text} ${entry.text}`.trim();
-  last.dur = Math.round((entry.t + entry.dur * 1000 - last.t) / 100) / 10;
-  return last;
+  const before = last.text;
+  const merged = `${last.text} ${entry.text}`.trim();
+  const cut = sentenceCut(merged);
+  if (cut < 0) {
+    last.text = merged;
+    last.dur = Math.round((entry.t + entry.dur * 1000 - last.t) / 100) / 10;
+    return [last];
+  }
+  const head = merged.slice(0, cut).trim();
+  const opened = {
+    speaker: entry.speaker,
+    text: merged.slice(cut).trim(),
+    t: entry.t,
+    dur: entry.dur,
+    lang: entry.lang ?? last.lang,
+  };
+  if (opened.lang === undefined) delete opened.lang;
+  transcript.push(opened);
+  if (head === before) return [opened];
+  last.text = head;
+  // The cut fell inside the piece that just arrived, so the closed turn ends
+  // where that piece began; the boundary inside the piece is not known.
+  last.dur = Math.round((entry.t - last.t) / 100) / 10;
+  return [last, opened];
 }
