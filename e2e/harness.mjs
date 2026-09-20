@@ -27,13 +27,9 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // The shipped files only, the same set the release zip takes: no dotfiles, tests,
 // docs, tooling or this harness. The copy's manifest gets a fourth version
-// component that changes every run: Chrome keeps an installed extension's
-// service worker script cached, and loading the same path at the same version
-// re-uses it — pages and the offscreen document read the current files while
-// background.js keeps running the version from the run that first loaded it
-// (measured: a same-version reload answered "Mensaje desconocido" to a message
-// the file on disk handled). A new version is an update, and an update
-// re-registers the worker; the origin's storage, with the model cache, stays.
+// component that grows every run, so a run can assert that Chrome loaded this
+// copy and not the install from an earlier run; the origin's storage, with the
+// model cache, survives the update.
 export function snapshot() {
   rmSync(SNAPSHOT, { recursive: true, force: true });
   mkdirSync(SNAPSHOT, { recursive: true });
@@ -49,10 +45,17 @@ export function snapshot() {
   }
   const manifestPath = join(SNAPSHOT, 'manifest.json');
   const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
-  const build = Math.floor(Date.now() / 1000) % 65535;
+  // Monotonic, or Chrome reads a smaller number as a downgrade and keeps the old
+  // worker (a clock-derived number wrapped once and did exactly that).
+  mkdirSync(PROFILE, { recursive: true });
+  const counter = join(PROFILE, 'build');
+  let build = 0;
+  try { build = Number(readFileSync(counter, 'utf8')) || 0; } catch { /* first run */ }
+  build = (build % 65000) + 1;
+  writeFileSync(counter, String(build));
   manifest.version = `${manifest.version.split('.').slice(0, 3).join('.')}.${build}`;
   writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + '\n');
-  return SNAPSHOT;
+  return { path: SNAPSHOT, version: manifest.version };
 }
 
 // Settings for a run. Defaults match setup.js so a run measures what a fresh install
@@ -89,10 +92,17 @@ export class Session {
 
   static async open({ fixture, headless = false, settings, log = () => {} }) {
     const { wav, manifest } = build(fixture);
-    const path = snapshot();
+    const { path, version } = snapshot();
     const chrome = await Chrome.launch({ profile: PROFILE, audioFile: wav, headless });
+    // Loaded twice on purpose. Measured: the first load of an already installed
+    // extension in a fresh browser session keeps the cached service-worker
+    // script even when the manifest version changed (pages saw the new version,
+    // background.js answered with the old code); a second load in the same
+    // session re-registers the worker.
+    await chrome.loadUnpacked(path);
+    await sleep(500);
     const extId = await chrome.loadUnpacked(path);
-    log(`extension ${extId}`);
+    log(`extension ${extId} ${version}`);
 
     // Console output of every extension context, for diagnosis: the offscreen
     // document and the worker log there and nowhere else.
@@ -135,6 +145,10 @@ export class Session {
       }
     });
     await sleep(500);
+    // The service worker is what a stale load keeps; a page's manifest read comes
+    // from the same install, so a mismatch here means the run would test old code.
+    const loaded = await chrome.evaluate(page, 'chrome.runtime.getManifest().version');
+    if (loaded !== version) throw new Error(`Chrome loaded ${loaded}, the snapshot is ${version}: stale install`);
     await chrome.evaluate(page, `
       chrome.runtime.onMessage.addListener((m) => {
         if (m && m.target === 'ui') __e2e(JSON.stringify({ t: Date.now(), ...m }));
