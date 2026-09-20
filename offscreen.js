@@ -63,6 +63,14 @@ const state = {
   // segmenter opens a new piece at every cut; its first preview must start from
   // nothing or it inherits the previous piece's committed prefix.
   pieceStart: { them: 0, me: 0 },
+  // The language each speaker is currently being transcribed in. Whisper has to be
+  // told a language before it decodes, so this is what a preview is decoded with;
+  // an authoritative turn is what corrects it (Groq detects the language itself,
+  // and on the local engine langid.js decides whether a re-pass is warranted).
+  lang: { them: 'en', me: 'en' },
+  // Which language the accumulated line was decoded in, so a switch discards it
+  // rather than appending across two languages.
+  stitchLang: { them: 'en', me: 'en' },
 };
 
 // ---------------------------------------------------------------- utilities
@@ -119,7 +127,7 @@ async function appendTranscript(entry) {
 function clearPartial(speaker) {
   state.stitch[speaker] = STITCH_EMPTY;
   if (speaker === 'them' && state.live) state.live.reset();
-  else broadcast({ type: 'PARTIAL', speaker, text: '', committed: '' });
+  else broadcast({ type: 'PARTIAL', speaker, text: '', committed: '', lang: state.lang[speaker] });
 }
 
 // ---------------------------------------------------------------- coach
@@ -378,11 +386,14 @@ async function transcribe(seg, lane) {
       // already landed: the other lane got there first.
       if (state.running && !state.paused && !isJunk(clean)
         && seg.startedAt > state.realDone[seg.speaker]) {
-        if (state.pieceStart[seg.speaker] !== seg.startedAt) {
-          // First preview of a new piece: start from nothing, or it inherits the
-          // previous piece's committed prefix.
+        if (state.pieceStart[seg.speaker] !== seg.startedAt
+          || state.stitchLang[seg.speaker] !== state.lang[seg.speaker]) {
+          // First preview of a new piece — or of a new language for this speaker.
+          // Either way the accumulated line cannot be built on: its words were
+          // decoded under a rule that no longer applies.
           state.stitch[seg.speaker] = STITCH_EMPTY;
           state.pieceStart[seg.speaker] = seg.startedAt;
+          state.stitchLang[seg.speaker] = state.lang[seg.speaker];
         }
         const out = stitch(state.stitch[seg.speaker], clean);
         state.stitch[seg.speaker] = out.state;
@@ -391,6 +402,7 @@ async function transcribe(seg, lane) {
           speaker: seg.speaker,
           text: `${out.committed} ${out.tail}`.trim(),
           committed: out.committed,
+          lang: state.lang[seg.speaker],
         });
       }
     } else if (!isJunk(clean)) {
@@ -403,6 +415,7 @@ async function transcribe(seg, lane) {
         text: clean,
         t: seg.startedAt,
         dur: Math.round(seg.durationMs / 100) / 10,
+        lang: state.lang[seg.speaker],
       });
       // An open cut means the speaker never paused: their line stays on screen and
       // the next piece's preview replaces it. Web Speech is the exception — its
@@ -472,6 +485,9 @@ async function start(streamId, settings, streamKind) {
   state.liveState = null;
   state.stitch = { them: STITCH_EMPTY, me: STITCH_EMPTY };
   state.pieceStart = { them: 0, me: 0 };
+  const sesion = settings.lang === 'es' ? 'es' : 'en';
+  state.lang = { them: sesion, me: sesion };
+  state.stitchLang = { them: sesion, me: sesion };
   state.segmenters = [];
   state.streams = [];
   // A stopped session is finished: its transcript must not become the opening of
@@ -577,10 +593,10 @@ async function startLiveLayer(themStream) {
     lang,
     onText: (text) => {
       if (text) state.liveHeard = true;
-      broadcast({ type: 'PARTIAL', speaker: 'them', text });
+      broadcast({ type: 'PARTIAL', speaker: 'them', text, lang: state.lang.them });
     },
     onError: (code) => {
-      broadcast({ type: 'PARTIAL', speaker: 'them', text: '' });
+      broadcast({ type: 'PARTIAL', speaker: 'them', text: '', lang: state.lang.them });
       broadcastLiveState('error', { detail: String(code), fallback: previewFallback() });
       stopLiveLayer();
     },
@@ -624,7 +640,7 @@ function stopLiveLayer() {
   state.live = null;
   try { state.liveTrack?.stop(); } catch { /* ya estaba parada */ }
   state.liveTrack = null;
-  broadcast({ type: 'PARTIAL', speaker: 'them', text: '' });
+  broadcast({ type: 'PARTIAL', speaker: 'them', text: '', lang: state.lang.them });
 }
 
 // Pause is not a small stop: the session, the streams and the invocation all stay

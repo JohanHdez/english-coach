@@ -58,7 +58,7 @@ overlay / sidepanel / setup ──► background ──► offscreen ──► w
 | `REPLY` | `answer[]` (one item; its key term wrapped in `**`), `ideas[]` (each `{en, es}`), or `pending`, or `error` | overlay, sidepanel |
 | `PAUSED` | `paused` | overlay, sidepanel |
 | `QUEUE` | `pending` | overlay, sidepanel |
-| `PARTIAL` | `speaker` (`them` or `me` — each voice paints its own line; views treat a missing value as `them`), `text` (that speaker's whole provisional line, English), `committed` (its settled prefix — the rest may still be rewritten) | overlay, sidepanel |
+| `PARTIAL` | `speaker` (`them` or `me` — each voice paints its own line; views treat a missing value as `them`), `text` (that speaker's whole provisional line, English), `committed` (its settled prefix — the rest may still be rewritten), `lang` (`en` or `es` — the language this speaker's line is currently being decoded in, so a view knows whether to translate it; a missing value is read as the session language) | overlay, sidepanel |
 | `LIVE_STATE` | `state` (`available`, `unsupported`, `unavailable`, `downloadable`, `downloading`, `error` — including the word-by-word lane reporting itself available and then never emitting a word, which the offscreen document only concludes after Whisper has transcribed `LIVE_PROOF_MS` of real speech — or `slow`, the preview lane retiring because a pass cost more than it saved), `detail?`, `fallback?` (the Whisper preview lane is standing in, so there *is* live text, just not word by word) | overlay, sidepanel |
 
 **offscreen ↔ worker** — plain `postMessage`, lowercase types, not part of this protocol:
