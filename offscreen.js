@@ -29,6 +29,9 @@ const state = {
   streams: [],
   worker: null,
   workerReady: false,
+  // Set only on an actual load/runtime failure, distinct from workerReady being
+  // merely not-yet-true during a legitimate first-run download.
+  workerFailed: false,
   queue: [],
   busy: false,
   busyPreview: false,
@@ -46,6 +49,9 @@ const state = {
   liveTrack: null,
   liveHeard: false,
   liveSilentMs: 0,
+  // The last kind sent to LIVE_STATE, replayed by rebroadcastLiveState() when a
+  // later worker failure makes an earlier broadcast's `fallback` wrong.
+  liveState: null,
   stitch: { them: STITCH_EMPTY, me: STITCH_EMPTY },
   // Which piece each speaker's stitched line belongs to, by its startedAt. The
   // segmenter opens a new piece at every cut; its first preview must start from
@@ -80,6 +86,14 @@ function broadcast(msg) {
 
 function status(text, kind = 'info', extra = {}) {
   broadcast({ type: 'STATUS', text, kind, ...extra });
+}
+
+// LIVE_STATE describes a condition that holds for the whole session (message
+// contract rule 11), so unlike STATUS its last kind is worth keeping: a later
+// correction can replay it with a fixed `fallback` instead of inventing a new one.
+function broadcastLiveState(kind, extra = {}) {
+  state.liveState = kind;
+  broadcast({ type: 'LIVE_STATE', state: kind, ...extra });
 }
 
 async function appendTranscript(entry) {
@@ -168,6 +182,23 @@ async function makeReport(auto = false) {
 
 // ------------------------------------------------------------------- engines
 
+const isApiEngine = () => (state.settings || {}).engine === 'api';
+
+// On the local engine the model IS the engine: a failed load ends the session and
+// says so in red. On the API engine the model only draws the live line — Groq
+// keeps transcribing real turns whether or not this ever loads — so the identical
+// failure must read as that one lane degrading, never as the session having died.
+// previewFallback() is what tells the UI the lane is actually gone.
+function failWorker(detail, stage) {
+  const wasFailed = state.workerFailed;
+  state.workerFailed = true;
+  if (isApiEngine()) status(`Sin línea en vivo: ${detail} · escuchando con Groq`, 'info');
+  else status(`Error del ${stage}: ${detail}`, 'error');
+  // The broadcast that told the UI Web Speech was down may have gone out with
+  // fallback: true before this failure existed; that promise is now false.
+  if (!wasFailed) rebroadcastLiveState();
+}
+
 function ensureWorker() {
   if (state.worker) return state.worker;
   const worker = new Worker('worker.js', { type: 'module' });
@@ -177,12 +208,17 @@ function ensureWorker() {
       status(`Descargando modelo ${m.file || ''} ${m.progress ? Math.round(m.progress) + '%' : ''}`, 'loading');
     } else if (m.type === 'ready') {
       state.workerReady = true;
-      status(`Modelo listo (${m.device}). Escuchando…`, 'ok');
+      // The worker retries a failed load after a cooldown; a later success clears
+      // the failure this session already reported.
+      state.workerFailed = false;
+      status(isApiEngine()
+        ? `Línea en vivo lista (${m.device}). Escuchando con Groq…`
+        : `Modelo listo (${m.device}). Escuchando…`, 'ok');
     } else if (m.type === 'error') {
-      status('Error del modelo: ' + m.message, 'error');
+      failWorker(m.message, 'modelo');
     }
   };
-  worker.onerror = (e) => status('Error del worker: ' + (e.message || 'desconocido'), 'error');
+  worker.onerror = (e) => failWorker(e.message || 'desconocido', 'worker');
   state.worker = worker;
   return worker;
 }
@@ -309,7 +345,7 @@ async function drain() {
       if (Date.now() - startedAt > PREVIEW_MAX_MS) {
         if (++state.previewSlow[seg.speaker] >= PREVIEW_SLOW_ROUNDS) {
           state.previewOff[seg.speaker] = true;
-          if (!anyLiveLaneLeft()) broadcast({ type: 'LIVE_STATE', state: 'slow', fallback: false });
+          if (!anyLiveLaneLeft()) broadcastLiveState('slow', { fallback: false });
         }
       } else {
         state.previewSlow[seg.speaker] = 0;
@@ -408,6 +444,8 @@ async function start(streamId, settings, streamKind) {
   state.seq = 0;
   state.previewSlow = { them: 0, me: 0 };
   state.previewOff = { them: false, me: false };
+  state.workerFailed = false;
+  state.liveState = null;
   state.stitch = { them: STITCH_EMPTY, me: STITCH_EMPTY };
   state.pieceStart = { them: 0, me: 0 };
   state.segmenters = [];
@@ -468,11 +506,12 @@ async function start(streamId, settings, streamKind) {
   }
 
   // The model is what draws the live line, so it loads on both engines now. On the
-  // API engine it costs one download the first time and buys a live line that the
-  // authoritative turns — which do go to Groq — cannot provide.
-  status(settings.engine === 'api'
-    ? 'Cargando modelo local para la línea en vivo…'
-    : 'Cargando modelo local…', 'loading');
+  // API engine Groq is what makes the session work, so it is 'ok' the instant
+  // capture is running rather than waiting on the worker's 'ready' — which would
+  // report a working Groq session as stuck loading, or as failed outright if the
+  // download never completes.
+  if (settings.engine === 'api') status('Escuchando (Groq API)…', 'ok');
+  else status('Cargando modelo local…', 'loading');
   ensureWorker().postMessage({
     type: 'init',
     model: settings.model || 'onnx-community/whisper-base.en',
@@ -497,7 +536,7 @@ async function startLiveLayer(themStream) {
   const lang = state.settings?.lang === 'es' ? 'es-ES' : 'en-US';
   const estado = await liveAvailability(lang);
   if (estado !== 'available' && estado !== 'unknown') {
-    broadcast({ type: 'LIVE_STATE', state: estado, fallback: previewFallback() });
+    broadcastLiveState(estado, { fallback: previewFallback() });
     return;
   }
   const source = themStream.getAudioTracks()[0];
@@ -514,13 +553,12 @@ async function startLiveLayer(themStream) {
     },
     onError: (code) => {
       broadcast({ type: 'PARTIAL', speaker: 'them', text: '' });
-      broadcast({ type: 'LIVE_STATE', state: 'error', detail: String(code), fallback: previewFallback() });
+      broadcastLiveState('error', { detail: String(code), fallback: previewFallback() });
       stopLiveLayer();
     },
   });
-  broadcast(state.live
-    ? { type: 'LIVE_STATE', state: 'available' }
-    : { type: 'LIVE_STATE', state: 'unavailable', fallback: previewFallback() });
+  if (state.live) broadcastLiveState('available');
+  else broadcastLiveState('unavailable', { fallback: previewFallback() });
 }
 
 // Web Speech can report itself available and then never emit a single word — the
@@ -532,19 +570,26 @@ async function startLiveLayer(themStream) {
 function retireSilentLiveLayer() {
   if (!state.live || state.liveHeard) return;
   stopLiveLayer();
-  broadcast({
-    type: 'LIVE_STATE',
-    state: 'error',
-    detail: 'no devolvió texto',
-    fallback: previewFallback(),
-  });
+  broadcastLiveState('error', { detail: 'no devolvió texto', fallback: previewFallback() });
 }
 
 // Whether losing Web Speech actually costs the learner the live line. It does not,
-// unless the preview lane itself is off or retired — the lane is local on every
-// engine now.
+// unless the preview lane itself is off, retired, or its worker never came up —
+// the lane is local on every engine now, but only once it is real. workerReady
+// alone would be the wrong signal here: it reads false during a legitimate
+// first-run download too, which is not a failure.
 const previewFallback = () =>
-  (state.settings || {}).liveTranscript !== false && !state.previewOff.them;
+  (state.settings || {}).liveTranscript !== false && !state.previewOff.them && !state.workerFailed;
+
+// The LIVE_STATE broadcasts above compute `fallback` from the worker's fate at
+// that instant. A failure arriving afterward makes an already-sent broadcast
+// wrong — promising Whisper text that will never arrive — so replay its kind
+// with a corrected fallback. Only when it would change anything shown: once Web
+// Speech is covering 'them' the preview lane's state is moot.
+function rebroadcastLiveState() {
+  if (!state.running || state.live) return;
+  broadcastLiveState(state.liveState || 'unavailable', { fallback: previewFallback() });
+}
 
 function stopLiveLayer() {
   state.live?.stop();
