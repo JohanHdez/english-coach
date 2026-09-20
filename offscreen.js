@@ -215,7 +215,12 @@ function ensureWorker() {
         ? `Línea en vivo lista (${m.device}). Escuchando con Groq…`
         : `Modelo listo (${m.device}). Escuchando…`, 'ok');
     } else if (m.type === 'error') {
-      failWorker(m.message, 'modelo');
+      // Every worker message reaches this listener and, when it carries an id,
+      // localTranscribe's own per-request listener below as well. A transcribe
+      // failure has that id and already reaches the user as that one segment's
+      // "Error transcribiendo" (drain's catch) — only a load failure, which has
+      // none, is a failure of the worker itself.
+      if (m.id == null) failWorker(m.message, 'modelo');
     }
   };
   worker.onerror = (e) => failWorker(e.message || 'desconocido', 'worker');
