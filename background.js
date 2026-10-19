@@ -1,16 +1,20 @@
 // Service worker: coordinates the side panel, the in-page overlay and the
 // offscreen document (which does the recording, transcribing and coaching).
 
-import { resolveChips, toggleNoteOpen } from './phrasebook.js';
+import { resolveChips, toggleNoteOpen, addNote } from './phrasebook.js';
 
 const OFFSCREEN_URL = 'offscreen.html';
+
+// The only fields PATCH_SETTINGS may touch: the side panel's own controls. An
+// unlisted key (an API key, say) never reaches the merge, whatever a sender asks for.
+const PATCHABLE_SETTINGS = ['lang', 'themSource', 'themDeviceId', 'captureMic', 'sessionContext', 'profile'];
 
 // The tab currently showing the overlay, plus the last broadcast state, so the
 // bar can be rebuilt in any tab without losing what it was showing.
 let sessionTabId = null;
 let running = false;
 let coachWindowId = null;
-const lastUi = { chips: null, reply: null, status: null, live: null };
+const lastUi = { chips: null, reply: null, status: null, live: null, paused: null };
 
 // When a tab is shared, Chrome can leave the user in a window with no side panel
 // and no extension bar: a system notification is the only thing they are
@@ -190,6 +194,12 @@ async function stage(name, fn) {
   }
 }
 
+// The overlay asks about itself, so the host it is asking about is the sender's.
+function hostOf(sender) {
+  try { return new URL(sender?.tab?.url || '').hostname.toLowerCase(); }
+  catch { return ''; }
+}
+
 // Forwards whatever the offscreen document broadcasts into the session tab, so
 // the overlay hears it even with the side panel closed.
 function relayToTab(msg) {
@@ -221,6 +231,7 @@ async function attachOverlay(tabId) {
   try {
     await chrome.tabs.sendMessage(tabId, { target: 'ui', type: 'RUNNING', running: true });
     if (lastUi.live) await chrome.tabs.sendMessage(tabId, lastUi.live);
+    if (lastUi.paused) await chrome.tabs.sendMessage(tabId, lastUi.paused);
     if (lastUi.chips) await chrome.tabs.sendMessage(tabId, lastUi.chips);
     if (lastUi.reply) await chrome.tabs.sendMessage(tabId, lastUi.reply);
   } catch { /* la pestaña no admite overlay */ }
@@ -287,6 +298,7 @@ async function startCapture(settings, invocation = {}) {
   // cache already holds this session's value and wiping it would lose the notice.
   lastUi.reply = null;
   lastUi.live = null;
+  lastUi.paused = null;
 
   if (settings.themSource === 'tab') {
     if (/^(chrome|edge|about|chrome-extension|devtools):/.test(tab.url || '')) {
@@ -343,6 +355,24 @@ async function forwardToOffscreen(type) {
   return chrome.runtime.sendMessage({ target: 'offscreen', type });
 }
 
+// Settings are one object that several views want to change one field of, at
+// the same time — a note toggled from the overlay while one is added from the
+// panel, the start button's save while a note lands. Read-modify-write from two
+// places loses whichever write comes second. So every change funnels through here,
+// queued: the worker is the only writer, and it writes one at a time. Module state
+// is ephemeral, which is fine — a suspended worker has nothing in flight.
+let settingsWrites = Promise.resolve();
+function patchSettings(mutate) {
+  const run = settingsWrites.then(async () => {
+    const { settings = {} } = await chrome.storage.local.get('settings');
+    const next = mutate(settings);
+    await chrome.storage.local.set({ settings: next });
+    return next;
+  });
+  settingsWrites = run.catch(() => {});
+  return run;
+}
+
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   // Everything the offscreen document broadcasts for the UIs is mirrored into the tab.
   if (msg.target === 'ui') {
@@ -353,6 +383,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     // reload must come back knowing the live layer is off, or it silently
     // promises word-by-word text that is never coming.
     if (msg.type === 'LIVE_STATE') lastUi.live = msg;
+    // Same reason LIVE_STATE is cached: it describes a condition that holds for the
+    // session, so a view injected after a reload must come back knowing about it.
+    if (msg.type === 'PAUSED') lastUi.paused = msg;
     relayToTab(msg);
     return;
   }
@@ -394,6 +427,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           sendResponse({ ok: true });
           break;
         }
+        case 'PAUSE':
+        case 'RESUME':
         case 'SUGGEST_REPLY':
         case 'REPORT': {
           sendResponse(await forwardToOffscreen(msg.type));
@@ -402,10 +437,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         // The offscreen document has no chrome.storage: we serve it from here.
         // A freshly injected overlay asks for state so it can paint itself fully.
         case 'UI_SYNC': {
-          const { transcript = [] } = await chrome.storage.local.get('transcript');
+          const { transcript = [], startedAt = 0 } = await chrome.storage.local.get(['transcript', 'startedAt']);
           const { settings = {} } = await chrome.storage.local.get('settings');
           sendResponse({
             running,
+            startedAt,
             turns: transcript.slice(-12),
             // lastUi is module state and is gone after a worker suspension, but the
             // chips derive from settings, which is already in hand: rebuild rather
@@ -414,8 +450,29 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             reply: lastUi.reply,
             status: lastUi.status,
             live: lastUi.live,
-            translate: settings.translate !== false && settings.lang !== 'es',
+            paused: lastUi.paused,
+            // Whether translation is on at all; which turns get one is decided per
+            // turn by the views (a Spanish turn never does), not by the session.
+            translate: settings.translate !== false,
+            pillPos: settings.pillPos || null,
+            pillHidden: (settings.pillHiddenHosts || []).includes(hostOf(sender)),
           });
+          break;
+        }
+        // The overlay has no chrome.storage: it parks the pill and mutes a site here.
+        case 'PILL_POS': {
+          await patchSettings((s) => ({ ...s, pillPos: msg.pos }));
+          sendResponse({ ok: true });
+          break;
+        }
+        case 'PILL_HIDE': {
+          const host = String(msg.host || '').toLowerCase();
+          await patchSettings((s) => {
+            const hosts = new Set(s.pillHiddenHosts || []);
+            if (host) hosts.add(host);
+            return { ...s, pillHiddenHosts: [...hosts] };
+          });
+          sendResponse({ ok: true });
           break;
         }
         case 'STORE_GET': {
@@ -430,9 +487,28 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         // The overlay has no chrome.storage: it flips a note's open state here.
         // Only the write happens — storage.onChanged re-broadcasts COACH_CHIPS.
         case 'TOGGLE_NOTE': {
-          const { settings = {} } = await chrome.storage.local.get('settings');
-          await chrome.storage.local.set({ settings: toggleNoteOpen(settings, msg.id) });
+          await patchSettings((s) => toggleNoteOpen(s, msg.id));
           sendResponse({ ok: true });
+          break;
+        }
+        // Same shape as TOGGLE_NOTE: only the write happens here.
+        case 'ADD_NOTE': {
+          await patchSettings((s) => addNote(s, { title: msg.title, body: msg.body }));
+          sendResponse({ ok: true });
+          break;
+        }
+        // The side panel's own fields (language, source, context, profile): a
+        // shallow merge over the stored object, queued like every other write.
+        // Only PATCHABLE_SETTINGS keys apply, and the reply omits the API keys —
+        // the side panel never reads them, so it never needs them echoed back.
+        case 'PATCH_SETTINGS': {
+          const patch = {};
+          for (const key of PATCHABLE_SETTINGS) {
+            if (key in (msg.patch || {})) patch[key] = msg.patch[key];
+          }
+          const settings = await patchSettings((s) => ({ ...s, ...patch }));
+          const { groqKey, anthropicKey, ...visible } = settings;
+          sendResponse({ ok: true, settings: visible });
           break;
         }
         case 'OPEN_REPORT': {

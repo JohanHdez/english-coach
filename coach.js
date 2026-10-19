@@ -134,6 +134,15 @@ async function callAnthropic({ key, model, system, user, maxTokens, base }) {
   return (data.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('\n');
 }
 
+// A thinking model spends its reasoning from the same ceiling before it writes any
+// of the answer — the note on JSON_BUDGET records this for Groq's gpt-oss models,
+// and Claude Opus 5 thinks by default, so every ceiling measured against a
+// non-thinking model is too low for it. Groq keeps its measured figures: its free
+// tier allows 8000 tokens a minute, so raising them there would trade a truncated
+// answer for a rate-limit error. A ceiling is not a target — nothing is spent on
+// headroom that goes unused.
+const THINKING_FLOOR = { anthropic: 16000 };
+
 // With only one key configured, the chosen provider may not be the one that has it.
 // Failing outright leaves the user with no report despite having the means to make one.
 export function resolveProvider(preferred, keys = {}) {
@@ -156,10 +165,11 @@ async function ask({ provider, model, keys, system, user, maxTokens = 700, schem
   // The requested model belongs to the original provider: switching means changing it.
   const usado = elegido.fallback ? PROVIDERS[elegido.provider].models[0] : model;
   const key = keys[PROVIDERS[elegido.provider].keyField];
+  const ceiling = Math.max(maxTokens, THINKING_FLOOR[elegido.provider] || 0);
   if (elegido.provider === 'groq') {
-    return callGroq({ key, model: usado, system, user, maxTokens, schema, base: groqBaseOf(keys) });
+    return callGroq({ key, model: usado, system, user, maxTokens: ceiling, schema, base: groqBaseOf(keys) });
   }
-  return callAnthropic({ key, model: usado, system, user, maxTokens, base: anthropicBaseOf(keys) });
+  return callAnthropic({ key, model: usado, system, user, maxTokens: ceiling, base: anthropicBaseOf(keys) });
 }
 
 // Extracts the first JSON object from a response, tolerating prose or ```json fences.
@@ -185,10 +195,37 @@ const clip = (text, max) => {
   return t.length <= max ? t : `${t.slice(0, max)}…`;
 };
 
-export function turnsToText(turns, limit = 10, maxChars = Infinity, maxTurnChars = Infinity) {
-  const lines = turns
+// Consecutive turns by one speaker in one language read as a single turn: a
+// monologue arrives as several sentence bubbles, and counting each against the
+// limit would push the other speaker's last words out of the window. Each
+// turn's text is clipped before it joins the run, never after: the cap bounds
+// one transcription (a Whisper repetition loop lands as a single turn), not a
+// run of sentence bubbles, and clipping the joined run would cut from its
+// start and lose the monologue's newest sentences instead.
+export function runsOf(turns, maxTurnChars = Infinity) {
+  const runs = [];
+  for (const t of turns) {
+    const text = clip(String(t.text ?? ''), maxTurnChars);
+    const last = runs[runs.length - 1];
+    if (last && last.speaker === t.speaker && (last.lang || null) === (t.lang || null)) {
+      last.text = `${last.text} ${text}`.trim();
+    } else {
+      runs.push({ speaker: t.speaker, lang: t.lang, text });
+    }
+  }
+  return runs;
+}
+
+// A turn is labelled with its language when that language is not the session's own,
+// or the session mixes both ('multi' has no single language to leave unlabelled).
+// An entry with no lang (recorded before the field existed) gets no label either way.
+export function turnsToText(turns, limit = 10, maxChars = Infinity, maxTurnChars = Infinity, sessionLang = 'en') {
+  const lines = runsOf(turns, maxTurnChars)
     .slice(-limit)
-    .map((t) => `${t.speaker === 'me' ? 'LEARNER' : 'OTHER'}: ${clip(t.text, maxTurnChars)}`);
+    .map((t) => {
+      const tag = t.lang && (t.lang !== sessionLang || sessionLang === 'multi') ? ` [${t.lang}]` : '';
+      return `${t.speaker === 'me' ? 'LEARNER' : 'OTHER'}${tag}: ${t.text}`;
+    });
   if (maxChars === Infinity) return lines.join('\n');
 
   const kept = [];
@@ -227,7 +264,17 @@ professional support (what to say, how to phrase it well in a work setting), not
 Every "en" field must contain the SPANISH phrase to say, in professional spoken register.
 Return "es" as an empty string.`;
 
-const langMode = (settings) => (settings.lang === 'es' ? SPANISH_MODE : '');
+// Bilingual-session override, appended to the reply prompt: turns are now labelled
+// (turnsToText), and the reply must speak whichever language the other person just
+// used rather than defaulting to English.
+const MULTI_MODE = `
+
+This conversation mixes English and Spanish: turns are labelled with the language
+they were spoken in ([en] or [es]), and your answer must be in the language of the
+OTHER speaker's most recent turn.`;
+
+const langMode = (settings) =>
+  settings.lang === 'es' ? SPANISH_MODE : settings.lang === 'multi' ? MULTI_MODE : '';
 
 // --- 1. Full reply on demand (keyboard shortcut) -----------------------------
 
@@ -305,7 +352,7 @@ export async function askReply({ turns, settings }) {
       // many small segments, so a turn count could drop the question itself. Below
       // TURN_MAX_CHARS a turn stays whole; past it, clip() truncates mid-content so a
       // single repetition loop can't dominate the budget.
-      + `\n\nConversation so far:\n${turnsToText(turns, 10, 1200, TURN_MAX_CHARS)}`
+      + `\n\nConversation so far:\n${turnsToText(turns, 10, 1200, TURN_MAX_CHARS, settings.lang)}`
       + `\n\nAnswer the other person's last turn for the learner: one speakable answer, then two study ideas.`,
     maxTokens: JSON_BUDGET,
     schema: REPLY_SCHEMA,
@@ -356,6 +403,14 @@ Nivel CEFR aproximado con una frase de justificación, tres ejercicios concretos
 y un consejo profesional de coach: qué hacer distinto en la próxima conversación para que cada
 una mejore la anterior.`;
 
+// Bilingual-session override: turns are now labelled by turnsToText, and only the
+// English ones are the learner practising — the Spanish ones are their own language.
+const REPORT_MULTI_MODE = `
+
+Esta conversación mezcla inglés y español: las intervenciones llevan una etiqueta de
+idioma ([en] o [es]). Las marcadas [es] son la lengua materna del alumno — úsalas solo
+como contexto, nunca las evalúes; evalúa únicamente las marcadas [en].`;
+
 // In a Spanish session the learner is a native speaker: grading their Spanish
 // grammar or CEFR level would be noise. The report becomes a communication
 // coach — clarity, fillers, better phrasings, professional formulas.
@@ -395,16 +450,19 @@ en la próxima conversación para que cada una mejore la anterior.`;
 export async function askReport({ turns, settings }) {
   const mine = turns.filter((t) => t.speaker === 'me').length;
   if (mine === 0) throw new CoachError('No hay intervenciones tuyas para analizar.');
-  const texto = turnsToText(turns, 400, REPORT_MAX_CHARS, TURN_MAX_CHARS);
+  const texto = turnsToText(turns, 400, REPORT_MAX_CHARS, TURN_MAX_CHARS, settings.lang);
   // A turn can be clipped mid-content by TURN_MAX_CHARS without ever being dropped, so
   // a shrinking line count alone misses it — check the raw turns for one over the cap too.
-  const recortada = texto.split('\n').length < turns.length
+  // Compared against runsOf's count, not turns.length: turnsToText emits one line per
+  // run, and consecutive same-speaker turns collapsing into one run is routine, not a cut.
+  const recortada = texto.split('\n').length < runsOf(turns).length
     || turns.some((t) => String(t.text ?? '').length > TURN_MAX_CHARS);
   return ask({
     provider: settings.reportProvider,
     model: settings.reportModel,
     keys: settings,
-    system: settings.lang === 'es' ? REPORT_SYSTEM_ES : REPORT_SYSTEM,
+    system: settings.lang === 'es' ? REPORT_SYSTEM_ES
+      : REPORT_SYSTEM + (settings.lang === 'multi' ? REPORT_MULTI_MODE : ''),
     user: `Nivel declarado: ${settings.level}. Contexto: ${settings.situation}.`
       + `${profileBlock(settings)}${contextBlock(settings)}\n\n`
       + `Transcripción${recortada ? ' (sólo la parte final de la conversación)' : ' completa'}:\n${texto}`,

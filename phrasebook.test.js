@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   CATALOGUE, DEFAULT_PHRASE_IDS, resolvePhrases, resolveNotes, resolveChips,
-  NOTE_TITLE_MAX, NOTE_BODY_MAX, MAX_NOTES, MAX_CUSTOM, toggleNoteOpen, pickEnglishVoice,
+  NOTE_TITLE_MAX, NOTE_BODY_MAX, MAX_NOTES, MAX_CUSTOM, toggleNoteOpen, addNote, pickEnglishVoice,
+  CUSTOM_CAT, phraseCategories,
 } from './phrasebook.js';
 
 const allItems = () => CATALOGUE.flatMap((c) => c.items);
@@ -132,7 +133,7 @@ test('toggleNoteOpen flips the targeted note and returns a new settings object',
   assert.equal(toggleNoteOpen(out, 'n.1').notes[0].open, false);
 });
 
-test('toggleNoteOpen leaves the other notes untouched', () => {
+test('toggleNoteOpen keeps every note but opens only the one asked for', () => {
   const settings = {
     notes: [
       { id: 'n.1', title: 'a', body: 'x', open: true },
@@ -141,7 +142,8 @@ test('toggleNoteOpen leaves the other notes untouched', () => {
     ],
   };
   const out = toggleNoteOpen(settings, 'n.2');
-  assert.deepEqual(out.notes.map((n) => n.open), [true, true, true]);
+  assert.deepEqual(out.notes.map((n) => n.open), [false, true, false]);
+  assert.deepEqual(out.notes.map((n) => n.body), ['x', 'y', 'z']);
   assert.deepEqual(out.notes.map((n) => n.title), ['a', 'b', 'c']);
 });
 
@@ -196,4 +198,62 @@ test('pickEnglishVoice survives an empty or malformed voice list', () => {
 
 test('pickEnglishVoice is not fooled by a language that merely starts with en', () => {
   assert.equal(pickEnglishVoice([voice('Enya', 'eng-X'), voice('Mónica', 'es-ES')]), null);
+});
+
+test('every resolved phrase carries the category it was catalogued under', () => {
+  const out = resolvePhrases({ phraseIds: ['time.second', 'clarify.repeat'] });
+  assert.deepEqual(out.map((p) => p.cat), ['Ganar tiempo', 'Pedir aclaración']);
+});
+
+test('a custom phrase lands in its own category instead of having none', () => {
+  const out = resolvePhrases({ phraseIds: [], customPhrases: [{ id: 'u.1', en: 'Ship it,', es: 'a producción' }] });
+  assert.deepEqual(out.map((p) => p.cat), [CUSTOM_CAT]);
+});
+
+test('phraseCategories keeps phrase order and never repeats a category', () => {
+  const cats = phraseCategories(resolvePhrases({
+    phraseIds: ['time.second', 'clarify.repeat', 'time.think'],
+    customPhrases: [{ id: 'u.1', en: 'Ship it,', es: 'a producción' }],
+  }));
+  assert.deepEqual(cats, ['Ganar tiempo', 'Pedir aclaración', CUSTOM_CAT]);
+});
+
+test('phraseCategories on nothing returns nothing rather than one empty category', () => {
+  assert.deepEqual(phraseCategories([]), []);
+  assert.deepEqual(phraseCategories(), []);
+});
+
+test('opening a note closes whichever one was open', () => {
+  const settings = { notes: [{ id: 'a', title: 'a', open: true }, { id: 'b', title: 'b' }] };
+  assert.deepEqual(toggleNoteOpen(settings, 'b').notes.map((n) => n.open), [false, true]);
+});
+
+test('toggling the open note closes it and leaves the rest closed', () => {
+  const settings = { notes: [{ id: 'a', title: 'a', open: true }, { id: 'b', title: 'b' }] };
+  assert.deepEqual(toggleNoteOpen(settings, 'a').notes.map((n) => n.open), [false, false]);
+});
+
+test('addNote appends an open note and closes the others', () => {
+  const before = { notes: [{ id: 'n.1', title: 'Daily', body: 'x', open: true }] };
+  const after = addNote(before, { title: 'Salary', body: 'Ask about the band.' });
+  assert.equal(after.notes.length, 2);
+  assert.equal(after.notes[0].open, false);
+  assert.deepEqual({ title: after.notes[1].title, body: after.notes[1].body, open: after.notes[1].open },
+    { title: 'Salary', body: 'Ask about the band.', open: true });
+  assert.ok(after.notes[1].id.startsWith('n.'));
+  assert.notEqual(after, before);
+  assert.equal(before.notes.length, 1, 'the input is not mutated');
+});
+
+test('addNote ignores an empty note and returns the same settings object', () => {
+  const before = { notes: [] };
+  assert.equal(addNote(before, { title: '   ', body: '' }), before);
+});
+
+test('addNote respects the cap and clamps the lengths', () => {
+  const full = { notes: Array.from({ length: MAX_NOTES }, (_, i) => ({ id: `n.${i}`, title: 't', body: 'b', open: false })) };
+  assert.equal(addNote(full, { title: 'one more', body: '' }), full);
+  const long = addNote({ notes: [] }, { title: 'x'.repeat(NOTE_TITLE_MAX + 5), body: 'y'.repeat(NOTE_BODY_MAX + 5) });
+  assert.equal(long.notes[0].title.length, NOTE_TITLE_MAX);
+  assert.equal(long.notes[0].body.length, NOTE_BODY_MAX);
 });

@@ -11,6 +11,7 @@
       <div class="brand">
         <span class="dot" id="dot"></span>
         <h1>English Coach</h1>
+        <span class="clock" id="clock" hidden></span>
       </div>
       <button id="settings" class="icon" title="Ajustes">⚙</button>
     </header>
@@ -21,6 +22,7 @@
         <select id="lang">
           <option value="en">Inglés — con coach y traducción</option>
           <option value="es">Español — apoyo profesional</option>
+          <option value="multi">Reunión bilingüe — inglés y español</option>
         </select>
       </label>
 
@@ -48,6 +50,11 @@
         <textarea id="sessionContext" rows="2" placeholder="entrevista técnica de Angular: signals, RxJS…"></textarea>
       </label>
 
+      <details class="field more" id="profileMore">
+        <summary>Mi perfil <span class="hint">· lo que el coach sabe de ti</span></summary>
+        <textarea id="profile" rows="3" placeholder="8 años con Angular. Migré la plataforma de pagos…"></textarea>
+      </details>
+
       <button id="toggle" class="primary">● Empezar</button>
       <p id="status" class="status">Listo.</p>
       <p id="liveNote" class="live-note" hidden>
@@ -57,12 +64,26 @@
     </section>
 
     <section id="coach" class="coach" hidden>
-      <div class="coach-head">
-        <span class="coach-title">Coach</span>
+      <div class="tabs">
+        <button id="tabPhrases" class="tab" type="button">Frases <span class="count"></span></button>
+        <button id="tabNotes" class="tab" type="button">Notas <span class="count"></span></button>
         <button id="askReply" class="small ghost" title="También con ⌘⇧E / Ctrl+Shift+E">💡 Respuesta</button>
       </div>
-      <div id="phrases" class="phrases"></div>
-      <div id="notes" class="notes"></div>
+      <div id="phrasesPane" class="pane">
+        <div id="cats" class="cats"></div>
+        <div id="phrases" class="chip-list"></div>
+      </div>
+      <div id="notesPane" class="pane" hidden>
+        <div id="notes" class="note-list"></div>
+        <details id="noteAdd" class="note-add">
+          <summary>＋ Añadir nota</summary>
+          <form id="noteForm" class="note-form">
+            <input id="noteTitle" type="text" placeholder="Título corto" />
+            <textarea id="noteBody" rows="3" placeholder="Lo que quieras tener a mano ahora mismo"></textarea>
+            <button id="noteSave" class="small primary" type="submit">Guardar nota</button>
+          </form>
+        </details>
+      </div>
       <div id="replyBox" class="reply" hidden>
         <p id="replyStatus" class="reply-status" hidden></p>
         <div id="replyAnswer" class="reply-group" hidden>
@@ -76,18 +97,31 @@
       </div>
     </section>
 
-    <section id="transcript" class="transcript">
-      <p class="empty">Aquí aparecerá la conversación transcrita.</p>
-    </section>
+    <div class="transcript-wrap">
+      <section id="transcript" class="transcript">
+        <p class="empty">Aquí aparecerá la conversación transcrita.</p>
+      </section>
+      <div class="overlays">
+        <button id="jump" class="jump" type="button" hidden></button>
+        <div id="sticky" class="sticky" hidden></div>
+      </div>
+    </div>
 
-    <div id="partial" class="partial" hidden>
+    <div id="partialThem" class="partial" hidden>
       <span class="meta">Interlocutor · hablando ahora</span>
-      <span id="partialEn"></span>
-      <span id="partialEs" class="es"></span>
+      <span id="partialThemEn"></span><span id="partialThemTail" class="partial-tail"></span>
+      <span id="partialThemEs" class="es"></span>
+    </div>
+    <div id="partialMe" class="partial me" hidden>
+      <span class="meta">Yo · hablando ahora</span>
+      <span id="partialMeEn"></span><span id="partialMeTail" class="partial-tail"></span>
     </div>
 
     <footer>
-      <button id="report" class="primary small">📊 Informe de la sesión</button>
+      <div class="row">
+        <button id="pause" class="small" hidden>⏸ Pausar</button>
+        <button id="report" class="primary small">📊 Informe de la sesión</button>
+      </div>
       <div class="row">
         <button id="analyze" class="small">Copiar prompt</button>
         <button id="download" class="small">Descargar</button>

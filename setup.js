@@ -8,6 +8,7 @@ const $ = (id) => document.getElementById(id);
 
 let customPhrases = [];
 let notes = [];
+let pillHiddenHosts = [];
 
 const DEFAULTS = {
   engine: 'local',
@@ -148,6 +149,31 @@ function renderCatalogue(chosen) {
   }
 }
 
+function renderPillHosts() {
+  const box = $('pillHosts');
+  box.textContent = '';
+  if (!pillHiddenHosts.length) {
+    const empty = document.createElement('p');
+    empty.className = 'hint';
+    empty.textContent = 'No has ocultado el botón en ningún sitio.';
+    box.append(empty);
+    return;
+  }
+  pillHiddenHosts.forEach((host, i) => {
+    const row = document.createElement('div');
+    row.className = 'phrase-row';
+    const name = document.createElement('b');
+    name.textContent = host;
+    const del = document.createElement('button');
+    del.type = 'button';
+    del.className = 'small';
+    del.textContent = 'Volver a mostrar';
+    del.addEventListener('click', () => { pillHiddenHosts.splice(i, 1); renderPillHosts(); });
+    row.append(name, del);
+    box.append(row);
+  });
+}
+
 function renderCustom() {
   const box = $('customList');
   box.textContent = '';
@@ -262,14 +288,24 @@ const countContext = wireCounter('sessionContext', 'contextCount', CONTEXT_MAX_C
 // control — it lives in the side panel — so it is read from storage here;
 // reporting on en-US while the learner runs Spanish sessions answers the wrong
 // question.
-async function liveLang() {
+async function sessionLang() {
   const { settings = {} } = await chrome.storage.local.get('settings');
-  return settings.lang === 'es' ? 'es-ES' : 'en-US';
+  return settings.lang || 'en';
+}
+
+async function liveLang() {
+  return (await sessionLang()) === 'es' ? 'es-ES' : 'en-US';
 }
 
 async function checkLive() {
   const el = $('liveStatus');
   const boton = $('installLive');
+  if ((await sessionLang()) === 'multi') {
+    el.textContent = 'En una reunión bilingüe la transcripción en vivo la hace Whisper, no el reconocimiento del navegador: un reconocedor sólo escucha un idioma.';
+    el.className = 'hint';
+    boton.hidden = true;
+    return;
+  }
   const estado = await liveAvailability(await liveLang());
   const [texto, clase] = LIVE_MSG[estado] || LIVE_MSG.unavailable;
   el.textContent = texto;
@@ -379,6 +415,7 @@ $('save').addEventListener('click', async () => {
     phraseIds: checkedIds(),
     customPhrases,
     notes: notes.filter((n) => (n.title || '').trim() || (n.body || '').trim()),
+    pillHiddenHosts,
   };
   await chrome.storage.local.set({ settings: next, setupDone: true });
   $('saved').textContent = ' Guardado ✓';
@@ -410,6 +447,7 @@ $('save').addEventListener('click', async () => {
   fillModelSelect($('reportModel'), `${s.reportProvider}:${s.reportModel}`);
   customPhrases = Array.isArray(s.customPhrases) ? s.customPhrases : [];
   notes = Array.isArray(s.notes) ? s.notes : [];
+  pillHiddenHosts = Array.isArray(s.pillHiddenHosts) ? s.pillHiddenHosts : [];
   if (globalThis.speechSynthesis) {
     globalThis.speechSynthesis.addEventListener('voiceschanged', loadVoices);
     loadVoices();
@@ -417,6 +455,7 @@ $('save').addEventListener('click', async () => {
   renderCatalogue(Array.isArray(s.phraseIds) ? s.phraseIds : DEFAULT_PHRASE_IDS);
   renderCustom();
   renderNotes();
+  renderPillHosts();
   await checkMic();
   await checkTranslator();
   await checkLive();

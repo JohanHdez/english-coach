@@ -109,8 +109,9 @@ security control, not formatting.
 **Errors.** Prefix user-visible failures with the stage that produced them: `[offscreen]`,
 `[captura]`, `[tabs.query]`. Chrome's own messages ("Invalid state") identify nothing.
 
-**Pure logic stays pure.** `segmenter.js`, `capture.js`, `coach.js`, `phrasebook.js` and
-`report.js` import no `chrome.*` and take their side effects as injected parameters
+**Pure logic stays pure.** `segmenter.js`, `capture.js`, `coach.js`, `phrasebook.js`,
+`stitch.js`, `queue.js`, `langid.js` and `report.js` import no `chrome.*` and take their side effects as
+injected parameters
 (`Segmenter(…, now)`, `openCaptureStream(…, gum)`). That is deliberate: they import and run
 unmodified in Node, which is the only way any of this is testable. Keep new logic on that side of
 the line.
@@ -143,6 +144,33 @@ Run preflight before claiming any change works, and reload the extension in
 Static checks cannot verify capture, permissions, or WebGPU; say so rather than implying they
 were tested.
 
+For anything that touches capture, segmentation, the queue, the worker or the live line, the
+end-to-end harness in `e2e/` is the evidence — it drives the installed Google Chrome over the
+DevTools pipe, loads a copy of the extension, and feeds a synthesised English/Spanish fixture
+through Chrome's fake microphone, so every sentence has a known onset and the run reports how
+long the live line and the bubble took:
+
+```bash
+node e2e/run.mjs english                 # one speaker, local engine (first run downloads the model)
+node e2e/run.mjs bilingual --lang=multi  # alternating languages
+node e2e/run.mjs english --engine=api    # Groq stand-in on localhost: no key, no audio leaves
+node e2e/run.mjs monologue30 --lanes=2   # the other speaker, half a minute without a pause
+node e2e/run.mjs talk30 --lanes=2 --only-them --translate   # the same half minute in sentences: where bubbles close
+```
+
+With `--lanes=2` the other speaker's lane runs too, and the harness installs the on-device
+Web Speech pack into its throwaway profile first, so that lane is measured with the same
+word-by-word recogniser a real install has — the Whisper preview lane alone hid the bug
+that blanked the line at the first forced cut. The run reports every stretch longer than
+2.5 s in which the live line was empty while a sentence was being spoken, both as sent
+(PARTIAL) and as painted in the side panel. The run also counts the speaker's bubbles: how many, the longest, the largest text a single
+repaint retranslated, and whether every closed bubble ends at a finished sentence.
+
+It covers device lanes only: Chrome grants tab audio on a user invocation alone, so the tab
+lane stays a manual check. It needs no dependencies (Node 22+, `say`, `afconvert`) and nothing
+under `e2e/` ships — the release zip excludes it. Quote the measured numbers; do not summarise
+them as "fast".
+
 ## Specialists
 
 Delegate to these rather than reasoning about their domain inline:
@@ -157,9 +185,19 @@ Skills: `/preflight`, `/add-provider`, `/release`.
 
 ## Known debt
 
-- `picker.js` and `picker.html` are unreachable and the `desktopCapture` permission they needed
-  is still requested. Preflight reports both.
-- `host_permissions` covers every site; only `huggingface.co`, `api.groq.com` and
-  `api.anthropic.com` are actually fetched.
-- `capture.js` and `report.js` are written to be testable but have no tests; `coach.js`,
-  `segmenter.js`, `worker.js` and `phrasebook.js` carry the 59 that exist.
+- `capture.js` and `report.js` are written to be testable but have no tests; the 158 that exist
+  live in `coach`, `segmenter`, `worker`, `phrasebook`, `stitch`, `queue`, `langid` and `live`.
+- The built-in Translator cannot be created in the harness's throwaway profile, so `--translate`
+  runs a stand-in that marks text `[es]` after 40 ms + 8 ms per character: it measures when
+  Spanish appears and disappears under a bubble, never what it says.
+- `worker.js`'s native language detection rests on vendored internals of transformers.js
+  (`_prepare_generation_config`, `_prepare_encoder_decoder_kwargs_for_generation`, a writable
+  `forward_params`). A `vendor/` refresh can silently cost two extra encoder passes or break the
+  path — it then falls back to the pipeline, warned once — and nothing static can see it; only
+  `node e2e/run.mjs bilingual --lang=multi` does.
+- A preview's one-token language probe has no confidence gate; a half-word preview can move a
+  speaker's language for one pass.
+- `PREVIEW_TAIL_MS` equals `MAX_SEG_MS` (8 s), so the preview tail cap is unreachable while a
+  phrase never dips; the two constants are independent by intent and coincide by value.
+- The end-to-end harness cannot drive the tab lane (`tabCapture` needs a user invocation); that
+  lane stays a manual check.

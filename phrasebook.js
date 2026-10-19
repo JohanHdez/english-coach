@@ -76,7 +76,11 @@ export const NOTE_BODY_MAX = 2000;
 export const MAX_NOTES = 20;
 export const MAX_CUSTOM = 40;
 
-const FLAT = CATALOGUE.flatMap((c) => c.items);
+// The category travels with the phrase. The views group by it, and flattening it
+// away here would mean every view rebuilding the grouping from CATALOGUE.
+const FLAT = CATALOGUE.flatMap((c) => c.items.map((item) => ({ ...item, cat: c.cat })));
+
+export const CUSTOM_CAT = 'Mis frases';
 const clamp = (value, max) => String(value ?? '').trim().slice(0, max);
 
 export function resolvePhrases(settings = {}) {
@@ -88,8 +92,14 @@ export function resolvePhrases(settings = {}) {
   const custom = (Array.isArray(settings.customPhrases) ? settings.customPhrases : [])
     .filter((p) => p && String(p.en ?? '').trim())
     .slice(0, MAX_CUSTOM)
-    .map((p) => ({ id: p.id, en: String(p.en).trim(), es: String(p.es ?? '').trim() }));
+    .map((p) => ({ id: p.id, en: String(p.en).trim(), es: String(p.es ?? '').trim(), cat: CUSTOM_CAT }));
   return [...builtins, ...custom];
+}
+
+// The distinct categories, in the order the phrases already come in, so the
+// filter row never lists one twice and never invents an order of its own.
+export function phraseCategories(phrases = []) {
+  return [...new Set((phrases || []).map((p) => p.cat || CUSTOM_CAT))];
 }
 
 export function resolveNotes(settings = {}) {
@@ -118,7 +128,24 @@ export function resolveChips(settings = {}) {
 // and one set of tests instead of two copies drifting apart.
 export function toggleNoteOpen(settings = {}, id) {
   const notes = Array.isArray(settings.notes) ? settings.notes : [];
-  return { ...settings, notes: notes.map((n) => (n && n.id === id ? { ...n, open: !n.open } : n)) };
+  // One note at a time. Two long notes open at once is what used to push the
+  // conversation off the panel, and the coach's cap should never have to absorb it.
+  const open = !(notes.find((n) => n && n.id === id) || {}).open;
+  return { ...settings, notes: notes.map((n) => (n ? { ...n, open: n.id === id && open } : n)) };
+}
+
+// Adding a note mid-conversation is a settings write like toggling one, from the
+// same two contexts, so it lives here for the same reason. The new note opens and
+// the others close: a note written while someone waits is wanted on screen now,
+// and one open note at a time is the rule toggleNoteOpen already keeps.
+export function addNote(settings = {}, { title, body } = {}) {
+  const notes = Array.isArray(settings.notes) ? settings.notes : [];
+  const t = clamp(title, NOTE_TITLE_MAX);
+  const b = clamp(body, NOTE_BODY_MAX);
+  if (!t && !b) return settings;
+  if (notes.length >= MAX_NOTES) return settings;
+  const note = { id: 'n.' + Date.now(), title: t, body: b, open: true };
+  return { ...settings, notes: [...notes.map((n) => (n ? { ...n, open: false } : n)), note] };
 }
 
 // Matching the language subtag, not a prefix: "eng-X" is not English here, and

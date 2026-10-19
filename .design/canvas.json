@@ -1,0 +1,22 @@
+{
+  "pages": [
+    { "id": "page-1", "name": "Propuesta" },
+    { "id": "page-2", "name": "Punto de partida" }
+  ],
+  "artboards": [
+    { "file": "Main.dc.html",                "page": "page-1", "x": 0,    "y": 0, "w": 424, "h": 984, "title": "Frases" },
+    { "file": "MainNotas.dc.html",           "page": "page-1", "x": 544,  "y": 0, "w": 424, "h": 984, "title": "Notas" },
+    { "file": "MainRespuesta.dc.html",       "page": "page-1", "x": 1088, "y": 0, "w": 424, "h": 984, "title": "Con respuesta sugerida" },
+    { "file": "Current.dc.html",             "page": "page-2", "x": 0,    "y": 0, "w": 424, "h": 984, "title": "Hoy — en reposo" },
+    { "file": "CurrentConRespuesta.dc.html", "page": "page-2", "x": 544,  "y": 0, "w": 424, "h": 984, "title": "Hoy — con la respuesta abierta" }
+  ],
+  "annotations": [
+    { "id": "brief", "page": "page-1", "x": 0, "y": -270, "w": 620, "text": "Overlay English Coach · 380×940\n\nDos pestañas arriba (Frases · Notas) con tope del 50%, separador, y la conversación abajo.\n\nEl cambio de fondo: hoy los chips y las notas ocupan sitio A LA VEZ (25% + 30%). Con pestañas es una zona o la otra, nunca las dos." },
+    { "id": "n-frases", "x": 0, "y": 1020, "w": 424, "page": "page-1", "text": "El 50% es un TOPE, no una altura fija: con tres frases activas el panel encoge y la conversación crece. Solo llega a la mitad cuando de verdad hay contenido que mostrar.\n\nLas categorías salen de CATALOGUE en phrasebook.js — hoy esa estructura se aplana y se pierde." },
+    { "id": "n-notas", "x": 544, "y": 1020, "w": 424, "page": "page-1", "text": "La nota abierta se lee entera, sin competir con las frases. Hoy comparten columna y ninguna de las dos cabe bien.\n\nEl contador en la pestaña dice qué hay al otro lado sin tener que cambiar de pestaña." },
+    { "id": "n-respuesta", "x": 1088, "y": 1020, "w": 424, "page": "page-1", "text": "Decisión mía: la respuesta sugerida ocupa el panel de arriba en lugar de abrir una tercera franja.\n\nCompara con la segunda pantalla de «Punto de partida»: allí la respuesta se lleva un 40% extra y la conversación cae a 72px. Aquí la conversación no se mueve ni un píxel." },
+    { "id": "n-hoy", "page": "page-2", "x": 0, "y": 1020, "w": 424, "text": "Los chips ocupan un 23% permanente en la posición más valiosa — y aun así están recortados: se ven 7 de los 10 activos." },
+    { "id": "n-hoy2", "page": "page-2", "x": 544, "y": 1020, "w": 424, "text": "El caso agudo, y es alcanzable: chips 25% + notas 30% + respuesta 40% = 95%. La conversación cae a su suelo de 72px. Pides ayuda y dejas de ver de qué hablabais." }
+  ],
+  "launch": { "view": "canvas", "page": "page-1" }
+}

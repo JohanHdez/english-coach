@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseReply, turnsToText, contextBlock, CONTEXT_MAX_CHARS, askReply, askReport } from './coach.js';
+import { parseReply, turnsToText, runsOf, contextBlock, CONTEXT_MAX_CHARS, askReply, askReport } from './coach.js';
 
 test('parseReply returns one speakable answer and two study ideas, cleaned', () => {
   const raw = JSON.stringify({
@@ -57,6 +57,31 @@ test('turnsToText always keeps at least the last turn, even over budget', () => 
   assert.ok(turnsToText(turns, 10, 5).includes('tiny budget'));
 });
 
+test('turnsToText labels a turn whose language differs from the session', () => {
+  const turns = [
+    { speaker: 'me', text: 'Hola, buenos días.', lang: 'es' },
+    { speaker: 'them', text: 'Good morning.', lang: 'en' },
+  ];
+  const text = turnsToText(turns, 10, Infinity, Infinity, 'en');
+  assert.ok(text.includes('LEARNER [es]: Hola, buenos días.'));
+  assert.ok(text.includes('OTHER: Good morning.'), 'a turn matching the session language gets no label');
+});
+
+test('turnsToText labels every lang-carrying turn in a multi session', () => {
+  const turns = [
+    { speaker: 'me', text: 'Hola, buenos días.', lang: 'es' },
+    { speaker: 'them', text: 'Good morning.', lang: 'en' },
+  ];
+  const text = turnsToText(turns, 10, Infinity, Infinity, 'multi');
+  assert.ok(text.includes('LEARNER [es]: Hola, buenos días.'));
+  assert.ok(text.includes('OTHER [en]: Good morning.'), "'multi' has no single unlabelled language");
+});
+
+test('turnsToText leaves an entry with no lang unlabelled, even in a multi session', () => {
+  const turns = [{ speaker: 'me', text: 'no lang on this one' }];
+  assert.ok(turnsToText(turns, 10, Infinity, Infinity, 'multi').includes('LEARNER: no lang on this one'));
+});
+
 test('contextBlock is empty when there are no notes', () => {
   assert.equal(contextBlock({}), '');
   assert.equal(contextBlock({ sessionContext: '   ' }), '');
@@ -81,6 +106,79 @@ function stubGroq(capture, content) {
   };
   return () => { globalThis.fetch = original; };
 }
+
+// Stub for the Anthropic endpoint: captures the request body instead of hitting
+// the network. Shaped like the Messages API response, which nests text blocks
+// under `content` rather than Groq's `choices`.
+function stubAnthropic(capture, text) {
+  const original = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    capture.url = url;
+    capture.body = JSON.parse(init.body);
+    capture.headers = init.headers;
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({ content: [{ type: 'text', text }], stop_reason: 'end_turn' }),
+    };
+  };
+  return () => { globalThis.fetch = original; };
+}
+
+const CLAUDE_SETTINGS = {
+  reportProvider: 'anthropic',
+  reportModel: 'claude-opus-5',
+  anthropicKey: 'sk-ant-test-key-for-unit-tests',
+  level: 'B1-B2',
+  situation: 'conversación de trabajo en inglés',
+  lang: 'en',
+};
+
+const TURNS = [
+  { speaker: 'me', text: 'I think we should ship it.', t: 1000, dur: 2 },
+  { speaker: 'them', text: 'Why this week?', t: 4000, dur: 1 },
+];
+
+test('the Claude report is given room to think before it answers', async () => {
+  // A thinking model spends its reasoning from max_tokens before writing a token
+  // of the answer, so a ceiling measured on a non-thinking model truncates it.
+  const seen = {};
+  const restore = stubAnthropic(seen, '# Informe\n\nTodo bien.');
+  try {
+    await askReport({ turns: TURNS, settings: CLAUDE_SETTINGS });
+  } finally {
+    restore();
+  }
+  assert.ok(seen.body.max_tokens >= 16000,
+    `Claude got max_tokens ${seen.body.max_tokens}; a thinking model needs room for reasoning plus the answer`);
+});
+
+test('Groq keeps its measured ceiling, which its free tier can pay for', async () => {
+  // Raising Groq's would trade a truncation for a rate-limit failure: the free
+  // tier allows 8000 tokens a minute.
+  const seen = {};
+  const restore = stubGroq(seen, '# Informe\n\nTodo bien.');
+  try {
+    await askReport({ turns: TURNS, settings: { ...REPLY_SETTINGS, reportProvider: 'groq' } });
+  } finally {
+    restore();
+  }
+  assert.equal(seen.body.max_completion_tokens, 2800);
+});
+
+test('never send a sampling parameter to Claude', async () => {
+  // temperature / top_p / top_k are rejected with a 400 on Opus 5 and Sonnet 5.
+  const seen = {};
+  const restore = stubAnthropic(seen, 'ok');
+  try {
+    await askReport({ turns: TURNS, settings: CLAUDE_SETTINGS });
+  } finally {
+    restore();
+  }
+  assert.ok(!('temperature' in seen.body));
+  assert.ok(!('top_p' in seen.body));
+  assert.ok(!('top_k' in seen.body));
+});
 
 const REPLY_SETTINGS = {
   reportProvider: 'groq',
@@ -110,6 +208,77 @@ test('askReply clips a repetition-loop turn out of its prompt', async () => {
   assert.ok(user.length < 2500, `reply prompt grew to ${user.length} chars`);
 });
 
+test("askReply's system prompt names the 'multi' rule only for a bilingual session", async () => {
+  const seen = {};
+  const restore = stubGroq(seen, REPLY_JSON);
+  try {
+    await askReply({ turns: TURNS, settings: { ...REPLY_SETTINGS, lang: 'multi' } });
+  } finally { restore(); }
+  const system = seen.body.messages.find((m) => m.role === 'system').content;
+  assert.ok(/mixes English and Spanish/.test(system));
+});
+
+test("askReply's system prompt says nothing about mixed languages for a plain English session", async () => {
+  const seen = {};
+  const restore = stubGroq(seen, REPLY_JSON);
+  try {
+    await askReply({ turns: TURNS, settings: REPLY_SETTINGS });
+  } finally { restore(); }
+  const system = seen.body.messages.find((m) => m.role === 'system').content;
+  assert.ok(!/mixes English and Spanish/.test(system));
+});
+
+test('askReply labels turns with their language in a bilingual session', async () => {
+  const turns = [
+    { speaker: 'them', text: 'How is the migration going?', lang: 'en' },
+    { speaker: 'me', text: 'Va bien, gracias.', lang: 'es' },
+  ];
+  const seen = {};
+  const restore = stubGroq(seen, REPLY_JSON);
+  try {
+    await askReply({ turns, settings: { ...REPLY_SETTINGS, lang: 'multi' } });
+  } finally { restore(); }
+  const user = seen.body.messages.find((m) => m.role === 'user').content;
+  assert.ok(user.includes('OTHER [en]: How is the migration going?'));
+  assert.ok(user.includes('LEARNER [es]: Va bien, gracias.'));
+});
+
+test("askReport's system prompt names the 'multi' rule only for a bilingual session", async () => {
+  const seen = {};
+  const restore = stubGroq(seen, 'Informe.');
+  try {
+    await askReport({ turns: TURNS, settings: { ...REPLY_SETTINGS, lang: 'multi' } });
+  } finally { restore(); }
+  const system = seen.body.messages.find((m) => m.role === 'system').content;
+  assert.ok(system.includes('[es]') && system.includes('[en]'));
+  assert.ok(/nunca las eval/.test(system), 'must say the Spanish turns are never graded');
+});
+
+test("askReport's system prompt says nothing about mixed languages for a plain English session", async () => {
+  const seen = {};
+  const restore = stubGroq(seen, 'Informe.');
+  try {
+    await askReport({ turns: TURNS, settings: REPLY_SETTINGS });
+  } finally { restore(); }
+  const system = seen.body.messages.find((m) => m.role === 'system').content;
+  assert.ok(!system.includes('[es]'));
+});
+
+test('askReport labels turns with their language in a bilingual session', async () => {
+  const turns = [
+    { speaker: 'me', text: 'Sí, absolutamente.', t: 1000, dur: 1, lang: 'es' },
+    { speaker: 'them', text: 'Great, thanks.', t: 2000, dur: 1, lang: 'en' },
+  ];
+  const seen = {};
+  const restore = stubGroq(seen, 'Informe.');
+  try {
+    await askReport({ turns, settings: { ...REPLY_SETTINGS, lang: 'multi' } });
+  } finally { restore(); }
+  const user = seen.body.messages.find((m) => m.role === 'user').content;
+  assert.ok(user.includes('LEARNER [es]: Sí, absolutamente.'));
+  assert.ok(user.includes('OTHER [en]: Great, thanks.'));
+});
+
 test('askReport marks the transcript partial when a turn is clipped, even if none is dropped', async () => {
   // Short enough that no turn is dropped for REPORT_MAX_CHARS, long enough that this
   // one turn alone crosses TURN_MAX_CHARS and gets truncated by clip().
@@ -123,4 +292,82 @@ test('askReport marks the transcript partial when a turn is clipped, even if non
   const user = seen.body.messages.find((m) => m.role === 'user').content;
   assert.ok(!user.includes('Transcripción completa'), 'a clipped turn is reported as a complete transcript');
   assert.ok(user.includes('sólo la parte final de la conversación'), 'a clipped turn should mark the transcript as partial');
+});
+
+test('turnsToText counts a run of same-speaker bubbles as one turn', () => {
+  // A monologue split into sentence bubbles must not push the learner's own
+  // question out of the window.
+  const turns = [
+    { speaker: 'me', text: 'How did the rollout go?', t: 0, dur: 2, lang: 'en' },
+    { speaker: 'them', text: 'It went fine.', t: 3000, dur: 3, lang: 'en' },
+    { speaker: 'them', text: 'The hardest part was the timezone.', t: 6000, dur: 3, lang: 'en' },
+    { speaker: 'them', text: 'We fixed it by Friday.', t: 9000, dur: 3, lang: 'en' },
+  ];
+  const text = turnsToText(turns, 2);
+  assert.equal(text, 'LEARNER: How did the rollout go?\nOTHER: It went fine. The hardest part was the timezone. We fixed it by Friday.');
+});
+
+test('turnsToText keeps runs apart across a language change', () => {
+  const turns = [
+    { speaker: 'them', text: 'We can ship on Friday.', t: 0, dur: 2, lang: 'en' },
+    { speaker: 'them', text: 'Perdón, ¿el viernes?', t: 3000, dur: 2, lang: 'es' },
+  ];
+  assert.equal(turnsToText(turns, 10, Infinity, Infinity, 'multi'), 'OTHER [en]: We can ship on Friday.\nOTHER [es]: Perdón, ¿el viernes?');
+});
+
+test('turnsToText clips each turn before joining a run, never the joined run', () => {
+  // Four bubbles of a monologue, each under the cap alone but well over it joined.
+  // Clipping the run (not each turn) would keep only the opening block.
+  const turns = ['a', 'b', 'c', 'd'].map((c) => ({ speaker: 'them', text: c.repeat(150) }));
+  const text = turnsToText(turns, 10, Infinity, 400);
+  assert.equal(text.split('\n').length, 1);
+  for (const c of ['a', 'b', 'c', 'd']) assert.ok(text.includes(c.repeat(150)), `block '${c}' was dropped`);
+});
+
+test('turnsToText clips an oversized turn from the middle of a run, keeping the newest turn intact', () => {
+  const turns = [
+    { speaker: 'them', text: 'x'.repeat(1000) },
+    { speaker: 'them', text: 'y'.repeat(10) },
+  ];
+  const text = turnsToText(turns, 10, Infinity, 400);
+  assert.equal(text.split('\n').length, 1);
+  assert.ok(text.includes(`${'x'.repeat(400)}…`));
+  assert.ok(text.endsWith('y'.repeat(10)), 'the newest turn in the run was cut off');
+});
+
+test('runsOf counts alternating turns individually', () => {
+  const turns = [
+    { speaker: 'me', text: 'a' },
+    { speaker: 'them', text: 'b' },
+    { speaker: 'me', text: 'c' },
+  ];
+  assert.equal(runsOf(turns).length, 3);
+});
+
+test('runsOf collapses consecutive same-speaker, same-language turns into one run', () => {
+  const turns = [
+    { speaker: 'me', text: 'a' },
+    { speaker: 'them', text: 'b' },
+    { speaker: 'them', text: 'c' },
+    { speaker: 'them', text: 'd' },
+  ];
+  assert.equal(runsOf(turns).length, 2);
+});
+
+test('askReport reports a complete transcript when consecutive same-speaker turns merge into one run', async () => {
+  // Two 'them' turns, ten seconds apart (past MERGE_GAP_MS, never folded by the
+  // segmenter) but still consecutive: turnsToText emits one line for both, which
+  // must not read as a trimmed transcript.
+  const turns = [
+    { speaker: 'me', text: 'How did it go?' },
+    { speaker: 'them', text: 'First half of what they said.' },
+    { speaker: 'them', text: 'Second half, ten seconds later.' },
+  ];
+  const seen = {};
+  const restore = stubGroq(seen, 'Informe de prueba.');
+  try {
+    await askReport({ turns, settings: REPLY_SETTINGS });
+  } finally { restore(); }
+  const user = seen.body.messages.find((m) => m.role === 'user').content;
+  assert.ok(user.includes('Transcripción completa'), 'two consecutive same-speaker turns wrongly marked the transcript as partial');
 });
